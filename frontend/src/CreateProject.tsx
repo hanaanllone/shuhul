@@ -139,6 +139,12 @@ function getReportRouteRows(result) {
       data?.environmental_cost?.sum ??
       data?.environmental_cost_index,
     treeEquivalent: data?.canopy?.estimated_tree_equivalent,
+    heatAdded: data?.heat?.heat_added_degree_ha,
+    heatRepaid: data?.heat?.heat_repaid_pct,
+    tempChange: data?.heat?.corridor_change_c,
+    heatError: data?.heat?.method?.held_out_error_c,
+    floodProne: data?.flood?.flood_prone_m2,
+    lostWater: data?.flood?.lost_water_m2,
   }));
 }
 
@@ -242,6 +248,8 @@ export default function CreateProject({
     trees: 60,
     greenery: 60,
     water: 60,
+    heat: 60,
+    flood: 60,
     shortest: 50,
     construction: 50,
   });
@@ -257,6 +265,8 @@ export default function CreateProject({
     heritage: false,
     water: false,
     forest: false,
+    flood: false,
+    steepSlope: false,
   });
 
   const [loading, setLoading] = useState(false);
@@ -558,6 +568,8 @@ export default function CreateProject({
         treePriority: parameters.trees,
         greeneryPriority: parameters.greenery,
         waterPriority: parameters.water,
+        heatPriority: parameters.heat,
+        floodPriority: parameters.flood,
         shortestPriority: parameters.shortest,
         constructionPriority: parameters.construction,
       },
@@ -566,6 +578,8 @@ export default function CreateProject({
         heritage: hardPriorities.heritage,
         water: hardPriorities.water,
         forest: hardPriorities.forest,
+        flood: hardPriorities.flood,
+        steepSlope: hardPriorities.steepSlope,
       },
     };
 
@@ -2196,6 +2210,50 @@ return (
                 <div className="parameter">
 
                   <div className="parameter-header">
+                    <label>Heat Priority</label>
+
+                    <span className="parameter-value">
+                      {parameters.heat}
+                    </span>
+                  </div>
+
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={parameters.heat}
+                    onChange={(e) =>
+                      updateParameter("heat", e.target.value)
+                    }
+                  />
+
+                </div>
+
+                <div className="parameter">
+
+                  <div className="parameter-header">
+                    <label>Flood Priority</label>
+
+                    <span className="parameter-value">
+                      {parameters.flood}
+                    </span>
+                  </div>
+
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={parameters.flood}
+                    onChange={(e) =>
+                      updateParameter("flood", e.target.value)
+                    }
+                  />
+
+                </div>
+
+                <div className="parameter">
+
+                  <div className="parameter-header">
                     <label>Shortest Route Priority</label>
 
                     <span className="parameter-value">
@@ -2279,6 +2337,28 @@ return (
                         }
                       />
                       Forest / Vegetation
+                    </label>
+
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={hardPriorities.flood}
+                        onChange={() =>
+                          toggleHardPriority("flood")
+                        }
+                      />
+                      Recorded Flood Land
+                    </label>
+
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={hardPriorities.steepSlope}
+                        onChange={() =>
+                          toggleHardPriority("steepSlope")
+                        }
+                      />
+                      Very Steep Terrain
                     </label>
 
                   </div>
@@ -2434,6 +2514,11 @@ return (
                           <span><b>{formatReportNumber(row.buildings, 0)}</b> buildings</span>
                           <span><b>{formatReportNumber(row.heritage, 0)}</b> heritage conflicts</span>
                           <span><b>{formatReportNumber(row.slope, 2)}°</b> mean slope</span>
+                          <span><b>{formatReportNumber(row.tempChange, 2)} °C</b> modelled corridor warming</span>
+                          <span><b>{formatReportNumber(row.heatAdded, 1)}</b> degree-hectares of heat added</span>
+                          <span><b>{formatReportNumber(row.heatRepaid, 0)}%</b> repaid by mitigation nearby</span>
+                          <span><b>{formatReportNumber(row.floodProne, 0)} m²</b> flood-prone land</span>
+                          <span><b>{formatReportNumber(row.lostWater, 0)} m²</b> former water</span>
                         </div>
                       </div>
                     ))}

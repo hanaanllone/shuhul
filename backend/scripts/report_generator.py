@@ -43,10 +43,16 @@ def build_report(project_payload, district, impact_result, mitigation_result):
             "green_area_m2": impact.get("green_space", {}).get("green_area_m2"),
             "canopy_area_m2": impact.get("canopy", {}).get("canopy_area_m2"),
             "water_area_m2": impact.get("water", {}).get("water_area_m2"),
-            "water_crossings": impact.get("water", {}).get("crossing_count"),
+            "water_crossings": impact.get("water", {}).get("estimated_crossings"),
             "buildings_affected": impact.get("buildings", {}).get("count"),
             "heritage_conflicts": impact.get("heritage", {}).get("count"),
-            "environmental_cost_index": impact.get("environmental_cost", {}).get("sum"),
+            "environmental_cost_index": impact.get("environmental_cost", {}).get("environmental_cost_index"),
+            "tree_equivalent": impact.get("canopy", {}).get("estimated_tree_equivalent"),
+            "heat_added_degree_ha": impact.get("heat", {}).get("heat_added_degree_ha"),
+            "heat_repaid_pct": impact.get("heat", {}).get("heat_repaid_pct"),
+            "corridor_change_c": impact.get("heat", {}).get("corridor_change_c"),
+            "flood_prone_m2": impact.get("flood", {}).get("flood_prone_m2"),
+            "lost_water_m2": impact.get("flood", {}).get("lost_water_m2"),
             "mitigation_radius_m": m.get("search_radius_m"),
             "mitigation_zones": summary.get("selected_zone_count", 0),
             "mitigation_capacity_m2": summary.get("selected_capacity_m2", 0),
@@ -54,6 +60,15 @@ def build_report(project_payload, district, impact_result, mitigation_result):
 
     total_zones = sum(_num(r.get("mitigation_zones")) for r in route_rows)
     total_capacity = sum(_num(r.get("mitigation_capacity_m2")) for r in route_rows)
+
+    heat_method = next(
+        (
+            impact["heat"]["method"]
+            for impact in impact_routes.values()
+            if impact.get("heat", {}).get("available")
+        ),
+        None,
+    )
 
     return {
         "title": project_payload.get("projectName", "Shuhul Project Report"),
@@ -75,6 +90,7 @@ def build_report(project_payload, district, impact_result, mitigation_result):
             "routes": mitigation_routes,
         },
         "impact_assumptions": impact_result.get("assumptions", {}),
+        "heat_method": heat_method,
         "project_inputs": {
             "softPreferences": project_payload.get("softPreferences", {}),
             "hardConstraints": project_payload.get("hardConstraints", {}),
@@ -85,6 +101,9 @@ def build_report(project_payload, district, impact_result, mitigation_result):
             "Tree-equivalent canopy uses a planning assumption and is not an individual tree count.",
             "Mitigation capacity represents feasible spatial opportunity and is not an exact ecological or thermal equivalence.",
             "Green-roof capacity uses a regional average when detailed roof-area data is unavailable.",
+            "Heat figures are modelled estimates of mid-morning summer surface temperature, not measurements and not air temperature.",
+            "Tree planting is credited at mature canopy, which takes years to reach.",
+            "Flood figures come from a screening index. No flood depth or drainage is modelled.",
         ],
     }
 
@@ -106,6 +125,31 @@ def render_report_html(report):
             f"<td>{_fmt(r.get('mitigation_capacity_m2'), 0)}</td>"
             "</tr>"
         )
+
+    heat_rows = []
+    for r in report.get("routes", []):
+        heat_rows.append(
+            "<tr>"
+            f"<td>{escape(str(r.get('route', '—')))}</td>"
+            f"<td>{_fmt(r.get('tree_equivalent'), 0)}</td>"
+            f"<td>{_fmt(r.get('corridor_change_c'), 2)}</td>"
+            f"<td>{_fmt(r.get('heat_added_degree_ha'), 1)}</td>"
+            f"<td>{_fmt(r.get('heat_repaid_pct'), 0)}</td>"
+            f"<td>{_fmt(r.get('flood_prone_m2'), 0)}</td>"
+            f"<td>{_fmt(r.get('lost_water_m2'), 0)}</td>"
+            "</tr>"
+        )
+
+    heat_method = report.get("heat_method") or {}
+    heat_note = (
+        f"<p class=\"small\">{escape(str(heat_method.get('what', '')))} "
+        f"Model error on parts of the district it was not trained on: "
+        f"{_fmt(heat_method.get('held_out_error_c'), 2)} °C. "
+        f"{escape(str(heat_method.get('degree_ha', '')))} "
+        f"{escape(str(heat_method.get('tree_note', '')))}</p>"
+        if heat_method
+        else "<p class=\"small\">No thermal model covers this district yet.</p>"
+    )
 
     mitigation_sections = []
     for route_name, route in report.get("mitigation", {}).get("routes", {}).items():
@@ -154,7 +198,7 @@ th {{ background:#f4f6f9; }}
 <b>Planning summary</b><br>
 Routes analyzed: {report.get('summary', {}).get('routes_analyzed', 0)}<br>
 Mitigation zones across routes: {report.get('summary', {}).get('mitigation_zones_across_routes', 0)}<br>
-Total selected mitigation opportunity: {_fmt(report.get('summary', {}).get('mitigation_capacity_m2'), 0)} m²
+Total selected mitigation opportunity: {_fmt(report.get('summary', {}).get('mitigation_capacity_m2_across_routes'), 0)} m²
 </div>
 
 <h2>Route comparison</h2>
@@ -166,6 +210,17 @@ Total selected mitigation opportunity: {_fmt(report.get('summary', {}).get('miti
 </tr></thead>
 <tbody>{''.join(rows)}</tbody>
 </table>
+
+<h2>Heat and flood</h2>
+<table>
+<thead><tr>
+<th>Route</th><th>Tree-equivalent canopy</th><th>Corridor temperature change °C</th>
+<th>Heat added, degree-hectares</th><th>Repaid near the route %</th>
+<th>Flood-prone land m²</th><th>Former water m²</th>
+</tr></thead>
+<tbody>{''.join(heat_rows)}</tbody>
+</table>
+{heat_note}
 
 <h2>Mitigation recommendations</h2>
 {''.join(mitigation_sections)}

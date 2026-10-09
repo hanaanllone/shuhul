@@ -32,9 +32,12 @@ from sklearn.model_selection import GroupKFold
 # Output:
 #
 # processed/<district>/thermal/
-#   features.tif     one band per feature, on the 30 m Landsat grid
-#   model.joblib     fitted model
-#   model.json       feature list, typical values, cross-validation error
+#   features.tif          one band per feature, on the 30 m Landsat grid
+#   model.joblib          fitted model
+#   model.json            feature list, typical values, cross-validation error
+#   heat_sensitivity.tif  estimated warming, deg C, if a cell were paved
+#
+# processed/<district>/heat_sensitivity.tif   the same on the 10 m grid
 #
 # The model is statistical, not physical. Its error on held-out blocks
 # of the district is saved in model.json and must travel with every
@@ -42,6 +45,7 @@ from sklearn.model_selection import GroupKFold
 #
 # Usage:
 #   python backend/scripts/build_thermal_model.py --district sxr
+#   python backend/scripts/build_thermal_model.py --district sxr --publish-only sxr sr-c
 #
 # ============================================================
 
@@ -414,16 +418,117 @@ def fit(district):
         log(f"  typical {surface:6s} ndvi {values['ndvi']:.2f} canopy {values['canopy_share']:.2f} built {values['built_share']:.2f} ({values['cells']:,} cells)")
     log(f"Saved: {output_dir}")
 
+    write_sensitivity(district, model, features, inside, grid, typical)
+
     return model, features, target, inside, summary
+
+
+def write_sensitivity(district, model, features, inside, grid, typical):
+    """
+    Estimated warming of each cell if it alone were paved. Cells that are
+    green today warm the most; cells that are already built barely change.
+    Route planning uses this to steer new roads away from the land that
+    is doing the most cooling.
+    """
+    road = typical["road"]
+    rows, cols = np.nonzero(inside)
+
+    current = np.column_stack([features[name][rows, cols] for name in FEATURES])
+    paved = current.copy()
+    for index, name in enumerate(FEATURES):
+        if name in road:
+            paved[:, index] = road[name]
+
+    warming = np.clip(model.predict(paved) - model.predict(current), 0, None)
+
+    sensitivity = np.full(inside.shape, NODATA, dtype="float32")
+    sensitivity[rows, cols] = warming
+
+    path = PROCESSED_ROOT / district / "thermal" / "heat_sensitivity.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        dtype="float32",
+        count=1,
+        width=grid["width"],
+        height=grid["height"],
+        crs=grid["crs"],
+        transform=grid["transform"],
+        nodata=NODATA,
+        compress="deflate",
+        tiled=True,
+    ) as dst:
+        dst.write(sensitivity, 1)
+
+    log(
+        f"Warming if paved: median {np.median(warming):.2f} C, "
+        f"90th percentile {np.percentile(warming, 90):.2f} C"
+    )
+    publish(district, district)
+
+
+def publish(source_district, district):
+    """
+    Write the heat sensitivity layer on a district's own 10 m grid. A
+    district that lies inside the source district reuses its model.
+    """
+    source = PROCESSED_ROOT / source_district / "thermal" / "heat_sensitivity.tif"
+    target = PROCESSED_ROOT / district / "heat_sensitivity.tif"
+
+    with rasterio.open(PROCESSED_ROOT / district / "ndvi.tif") as master:
+        reference = master.read(1)
+        valid = np.isfinite(reference) & (reference != master.nodata)
+        profile = {
+            "driver": "GTiff",
+            "dtype": "float32",
+            "count": 1,
+            "width": master.width,
+            "height": master.height,
+            "crs": master.crs,
+            "transform": master.transform,
+            "nodata": NODATA,
+            "compress": "deflate",
+            "tiled": True,
+        }
+
+    out = np.full((profile["height"], profile["width"]), np.nan, dtype="float32")
+    with rasterio.open(source) as src:
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=out,
+            dst_transform=profile["transform"],
+            dst_crs=profile["crs"],
+            dst_nodata=np.nan,
+            resampling=Resampling.bilinear,
+        )
+
+    out[~valid | ~np.isfinite(out)] = NODATA
+    with rasterio.open(target, "w", **profile) as dst:
+        dst.write(out, 1)
+
+    log(f"Published {target}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Fit the district thermal model.")
     parser.add_argument("--district", default="sxr")
+    parser.add_argument(
+        "--publish-only",
+        nargs="+",
+        metavar="DISTRICT",
+        help="Skip fitting and write heat_sensitivity.tif for these districts from --district.",
+    )
     args = parser.parse_args()
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+
+        if args.publish_only:
+            for district in args.publish_only:
+                publish(args.district, district)
+            return
+
         fit(args.district)
 
 

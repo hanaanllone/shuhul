@@ -35,6 +35,8 @@ DEFAULT_WEIGHTS = {
     "buildings": 0.15,
     "roads": 0.05,
     "heritage": 0.10,
+    "heat": 0.10,
+    "flood": 0.10,
 }
 
 
@@ -47,6 +49,7 @@ CONSTRUCTION = {
         "heritage": 1.00,
         "slope": 1.00,
         "canopy": 1.00,
+        "flood": 1.00,
     },
     "bridge": {
         "water": 0.35,
@@ -54,6 +57,7 @@ CONSTRUCTION = {
         "heritage": 1.00,
         "slope": 0.90,
         "canopy": 0.85,
+        "flood": 0.50,
     },
     "flyover": {
         "water": 0.60,
@@ -61,8 +65,21 @@ CONSTRUCTION = {
         "heritage": 1.15,
         "slope": 0.90,
         "canopy": 0.75,
+        "flood": 0.50,
     },
 }
+
+
+# Estimated warming, in deg C, that counts as the highest heat cost.
+HEAT_SENSITIVITY_MAX_C = 2.0
+
+# Flood susceptibility index: cost starts at the moderate class, and the
+# very high class is what a hard flood constraint forbids.
+FLOOD_MODERATE = 0.45
+FLOOD_VERY_HIGH = 0.85
+
+# Slope a hard steep-terrain constraint forbids, in degrees.
+STEEP_SLOPE_DEG = 30.0
 
 
 # ============================================================
@@ -209,6 +226,8 @@ def build_weights(
     tree_priority,
     greenery_priority,
     water_priority,
+    heat_priority=0.5,
+    flood_priority=0.5,
 ):
     """
     Turn user-facing 0-1 priorities into environmental weights.
@@ -236,6 +255,10 @@ def build_weights(
     water_scale = 0.25 + water_priority
 
     weights["water"] *= water_scale
+
+    # Heat and flood priorities control their own factors.
+    weights["heat"] *= 0.25 + heat_priority
+    weights["flood"] *= 0.25 + flood_priority
 
     total = sum(weights.values())
 
@@ -270,6 +293,12 @@ def build_cost_surface(
     hard_heritage=False,
     hard_water=False,
     hard_forest=False,
+
+    heat_priority=0.5,
+    flood_priority=0.5,
+
+    hard_flood=False,
+    hard_steep=False,
 ):
 
     district_dir = Path(district_dir)
@@ -336,6 +365,8 @@ def build_cost_surface(
             "forest",
             "forests",
         ])
+        heat = layer(["heat_sensitivity"])
+        flood = layer(["flood"])
 
     modifier = CONSTRUCTION[construction]
 
@@ -437,9 +468,42 @@ def build_cost_surface(
     )
 
     # --------------------------------------------------------
+    # HEAT
+    #
+    # Estimated warming if the cell were paved. Green land that is
+    # cooling its surroundings costs the most; land that is already
+    # built costs almost nothing.
+    # --------------------------------------------------------
+
+    heat_cost = (
+        normalize(
+            heat,
+            0,
+            HEAT_SENSITIVITY_MAX_C,
+        )
+        if heat is not None
+        else np.zeros_like(ndvi)
+    )
+
+    # --------------------------------------------------------
+    # FLOOD
+    # --------------------------------------------------------
+
+    flood_cost = (
+        normalize(
+            flood,
+            FLOOD_MODERATE,
+            FLOOD_VERY_HIGH,
+        )
+        if flood is not None
+        else np.zeros_like(ndvi)
+    )
+
+    # --------------------------------------------------------
     # CONSTRUCTION MODIFIERS
     # --------------------------------------------------------
 
+    flood_cost *= modifier["flood"]
     water_cost *= modifier["water"]
     building_cost *= modifier["building"]
     heritage_cost *= modifier["heritage"]
@@ -454,6 +518,8 @@ def build_cost_surface(
         tree_priority=tree_priority,
         greenery_priority=greenery_priority,
         water_priority=water_priority,
+        heat_priority=heat_priority,
+        flood_priority=flood_priority,
     )
 
     soft_cost = (
@@ -464,6 +530,8 @@ def build_cost_surface(
         + weights["buildings"] * building_cost
         + weights["roads"] * road_cost
         + weights["heritage"] * heritage_cost
+        + weights["heat"] * heat_cost
+        + weights["flood"] * flood_cost
     )
 
     # Scale to 0-100.
@@ -531,6 +599,40 @@ def build_cost_surface(
             print(
                 "WARNING: --hard-forest requested, "
                 "but no forest raster was found."
+            )
+
+    # Flood: land where water has been recorded.
+    if hard_flood:
+
+        if flood is not None:
+
+            hard_mask[
+                np.isfinite(flood)
+                & (flood >= FLOOD_VERY_HIGH)
+            ] = 1
+
+        else:
+
+            print(
+                "WARNING: hard flood constraint requested, "
+                "but no flood raster was found."
+            )
+
+    # Steep terrain
+    if hard_steep:
+
+        if slope is not None:
+
+            hard_mask[
+                np.isfinite(slope)
+                & (slope >= STEEP_SLOPE_DEG)
+            ] = 1
+
+        else:
+
+            print(
+                "WARNING: hard steep-terrain constraint requested, "
+                "but no slope raster was found."
             )
 
     # --------------------------------------------------------
@@ -616,12 +718,25 @@ def build_cost_surface(
             "water_priority": water_priority,
             "shortest_priority": shortest_priority,
             "construction_priority": construction_priority,
+            "heat_priority": heat_priority,
+            "flood_priority": flood_priority,
         },
 
         "hard_constraints": {
             "heritage": hard_heritage,
             "water": hard_water,
             "forest": hard_forest,
+            "flood": hard_flood,
+            "steep_slope": hard_steep,
+        },
+
+        "layers_used": {
+            "buildings": buildings is not None,
+            "roads": roads is not None,
+            "heritage": heritage is not None,
+            "forest": forest is not None,
+            "heat": heat is not None,
+            "flood": flood is not None,
         },
 
         "weights": weights,

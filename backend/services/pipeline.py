@@ -68,6 +68,8 @@ def validate_payload(payload):
         "waterPriority",
         "shortestPriority",
         "constructionPriority",
+        "heatPriority",
+        "floodPriority",
     ):
         value = float(payload["softPreferences"].get(key, 50))
 
@@ -280,6 +282,14 @@ def run_cost_surface(district, payload, output_dir):
         hard_heritage=bool(hard.get("heritage")),
         hard_water=bool(hard.get("water")),
         hard_forest=bool(hard.get("forest")),
+        heat_priority=float(
+            prefs.get("heatPriority", 50)
+        ) / 100,
+        flood_priority=float(
+            prefs.get("floodPriority", 50)
+        ) / 100,
+        hard_flood=bool(hard.get("flood")),
+        hard_steep=bool(hard.get("steepSlope")),
     )
 
     config_path = (
@@ -696,6 +706,19 @@ def run_mitigation_analysis(district, payload, output_dir):
     }
 
 
+def run_route_effects(district, payload, impact_result, mitigation_result, output_dir):
+    """Add modelled heat and flood effects to each route of the impact result."""
+    from .route_effects import add_route_effects
+
+    return add_route_effects(
+        district,
+        payload,
+        impact_result,
+        mitigation_result,
+        output_dir,
+    )
+
+
 def run_report_generation(district, payload, impact_result, mitigation_result, output_dir):
     project_root = Path(__file__).resolve().parents[2]
     script = project_root / "backend" / "scripts" / "report_generator.py"
@@ -813,8 +836,22 @@ def run_project(project_id, payload):
 
         _stage(
             project_id,
+            "Estimating heat and flood effects",
+            88,
+        )
+
+        run_route_effects(
+            district,
+            payload,
+            impact_result,
+            mitigation_result,
+            output_dir,
+        )
+
+        _stage(
+            project_id,
             "Preparing project report",
-            92,
+            94,
         )
 
         report_result = run_report_generation(
@@ -849,9 +886,9 @@ def run_project(project_id, payload):
                     "route_generation",
                     "impact_analysis",
                     "mitigation_analysis",
+                    "route_effects",
                     "report_generation",
                 ],
-                "thermal": "not_run",
             },
         }
 
