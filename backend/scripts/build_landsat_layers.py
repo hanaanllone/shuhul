@@ -33,12 +33,15 @@ from rasterio.warp import reproject, Resampling
 #   lst_current.tif        median of the latest three yearly composites
 #   summary.json
 #
+# processed/<district>/lst.tif   lst_current on the district's 10 m grid
+#
 # The thermal band is sensed at 100 m and delivered resampled to 30 m.
 # Landsat passes at about 10:50 local time, so this is mid-morning
 # surface temperature, not air temperature and not a daily maximum.
 #
 # Usage:
 #   python backend/scripts/build_landsat_layers.py --district sxr
+#   python backend/scripts/build_landsat_layers.py --district sxr --publish-only sxr sr-c
 #
 # ============================================================
 
@@ -317,13 +320,60 @@ def build(district, years):
     log(f"Current LST ({latest[0]}-{latest[-1]}): {current_path}")
 
 
+def publish(source_district, district):
+    """
+    Write the current temperature layer on a district's own 10 m grid, so
+    the modules that need every layer on one grid can read it. A district
+    that lies inside the source district reuses its composites.
+    """
+    source = PROCESSED_ROOT / source_district / "yearly" / "lst_current.tif"
+    target = PROCESSED_ROOT / district / "lst.tif"
+
+    with rasterio.open(PROCESSED_ROOT / district / "ndvi.tif") as master:
+        reference = master.read(1)
+        inside = np.isfinite(reference) & (reference != master.nodata)
+        grid = {
+            "crs": master.crs,
+            "transform": master.transform,
+            "width": master.width,
+            "height": master.height,
+        }
+
+    out = np.full((grid["height"], grid["width"]), np.nan, dtype="float32")
+    with rasterio.open(source) as src:
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=out,
+            dst_transform=grid["transform"],
+            dst_crs=grid["crs"],
+            dst_nodata=np.nan,
+            resampling=Resampling.bilinear,
+        )
+
+    out[~inside] = np.nan
+    write_layer(target, out, grid)
+    log(f"Published {target}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build yearly Landsat composites.")
     parser.add_argument("--district", default="sxr")
     parser.add_argument("--years", default="2017-2025")
+    parser.add_argument(
+        "--publish-only",
+        nargs="+",
+        metavar="DISTRICT",
+        help="Skip compositing and write lst.tif for these districts from --district.",
+    )
     args = parser.parse_args()
 
+    if args.publish_only:
+        for district in args.publish_only:
+            publish(args.district, district)
+        return
+
     build(args.district, parse_years(args.years))
+    publish(args.district, args.district)
 
 
 if __name__ == "__main__":

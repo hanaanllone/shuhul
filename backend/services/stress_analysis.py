@@ -47,6 +47,17 @@ WEIGHTS = {
     "ndwi": 0.10,
 }
 
+# What a high score on each indicator means, in a planner's words.
+DRIVER_LABELS = {
+    "ndvi": "Low vegetation",
+    "canopy": "Low tree canopy",
+    "lst": "High surface temperature",
+    "buildings": "High built-up density",
+    "ndwi": "Low surface moisture",
+}
+DRIVER_MIN_SCORE = 0.5
+MAX_DRIVERS = 3
+
 
 def find_raster(directory, *names):
     for name in names:
@@ -81,7 +92,10 @@ def read_aligned(path, shape, transform, crs):
             height=shape[0],
             resampling=Resampling.bilinear,
         ) as vrt:
-            return vrt.read(1).astype("float32")
+            data = vrt.read(1).astype("float32")
+            if vrt.nodata is not None:
+                data[data == vrt.nodata] = np.nan
+            return data
 
 
 def finite(arr):
@@ -149,7 +163,8 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
 
     ndvi_path = find_raster(directory, "ndvi")
     ndwi_path = find_raster(directory, "ndwi")
-    canopy_path = find_raster(directory, "canopy", "chm")
+    canopy_path = find_raster(directory, "tree_height", "canopy", "chm")
+    roof_path = find_raster(directory, "buildings")
     lst_path = find_raster(directory, "lst", "land_surface_temperature")
     buildings_path = find_buildings(directory)
 
@@ -173,7 +188,13 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
         read_aligned(lst_path, shape, transform, crs)
         if lst_path else np.full(shape, np.nan, dtype="float32")
     )
-    buildings = building_grid(buildings_path, shape, transform, crs)
+    # Share of each cell under a roof where that layer exists, otherwise
+    # the named footprints, which cover only a fraction of real buildings.
+    buildings = (
+        read_aligned(roof_path, shape, transform, crs)
+        if roof_path
+        else building_grid(buildings_path, shape, transform, crs)
+    )
 
     base_valid = finite(ndvi) & finite(ndwi)
 
@@ -220,6 +241,7 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
 
             scores = []
             weights = []
+            parts = {}
 
             for key, weight in WEIGHTS.items():
                 if key not in stress:
@@ -229,11 +251,24 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
                 if usable.size:
                     scores.append(float(np.mean(usable)))
                     weights.append(weight)
+                    parts[key] = (scores[-1], weight)
 
             if not scores:
                 continue
 
             score = float(np.average(scores, weights=weights))
+
+            # The indicators that push this zone's score up the most.
+            ranked = sorted(
+                parts.items(),
+                key=lambda item: item[1][0] * item[1][1],
+                reverse=True,
+            )
+            drivers = [
+                {"key": key, "label": DRIVER_LABELS[key], "score": round(value, 3)}
+                for key, (value, _) in ranked
+                if value >= DRIVER_MIN_SCORE
+            ][:MAX_DRIVERS]
 
             if score >= 0.67:
                 level = "HIGH"
@@ -264,6 +299,10 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
                     "zone_id": f"Zone {zone_number}",
                     "stress_level": level,
                     "stress_score": round(score, 3),
+                    "drivers": drivers,
+                    "indicator_scores": {
+                        key: round(value, 3) for key, (value, _) in parts.items()
+                    },
                     "mean_ndvi": round(mean_in(ndvi), 4) if mean_in(ndvi) is not None else None,
                     "mean_ndwi": round(mean_in(ndwi), 4) if mean_in(ndwi) is not None else None,
                     "canopy_cover_pct": round(canopy_pct, 2) if canopy_pct is not None else None,
@@ -287,12 +326,45 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
     }
 
 
+def cached_stress(district):
+    """
+    Return the district stress layer as GeoJSON text, computing it only
+    when it has not been built yet or an input layer has changed since.
+    """
+    directory = Path(PROCESSED_ROOT) / district
+    cache = Path(OUTPUT_ROOT) / "stress" / f"{district}.geojson"
+
+    inputs = [
+        path
+        for path in (
+            find_raster(directory, "ndvi"),
+            find_raster(directory, "ndwi"),
+            find_raster(directory, "tree_height", "canopy", "chm"),
+            find_raster(directory, "lst", "land_surface_temperature"),
+            find_raster(directory, "buildings"),
+            find_buildings(directory),
+            Path(__file__),
+        )
+        if path is not None
+    ]
+
+    if cache.exists() and all(
+        cache.stat().st_mtime >= path.stat().st_mtime for path in inputs
+    ):
+        return cache.read_text(encoding="utf-8")
+
+    text = json.dumps(generate_stress_data(district))
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(text, encoding="utf-8")
+    return text
+
+
 def register_stress_routes(app):
     @app.get("/api/stress/<district>")
     def ecological_stress(district):
         try:
             return app.response_class(
-                response=json.dumps(generate_stress_data(district)),
+                response=cached_stress(district),
                 status=200,
                 mimetype="application/geo+json",
             )
