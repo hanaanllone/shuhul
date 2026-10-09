@@ -6,6 +6,13 @@ from ..config import PROCESSED_ROOT, OUTPUT_ROOT, DEFAULT_DISTRICT
 from ..db import update_project
 
 
+def project_dir(project_id):
+    """Every file a project produces lives in its own folder."""
+    path = OUTPUT_ROOT / "projects" / str(project_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _stage(project_id, name, progress):
     update_project(
         project_id,
@@ -220,7 +227,7 @@ def resolve_district_from_raster(payload):
     return DEFAULT_DISTRICT, "fallback_default_district"
 
 
-def run_cost_surface(district, payload):
+def run_cost_surface(district, payload, output_dir):
     script = (
         Path(__file__).resolve().parents[1]
         / "scripts"
@@ -245,9 +252,6 @@ def run_cost_surface(district, payload):
     prefs = payload["softPreferences"]
     hard = payload["hardConstraints"]
     construction = payload["constructionType"]
-
-    output_dir = OUTPUT_ROOT / "cost_surfaces" / district
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     result = module.build_cost_surface(
         district_dir=PROCESSED_ROOT / district,
@@ -291,7 +295,7 @@ def run_cost_surface(district, payload):
     return result
 
 
-def generate_routes(district, payload, cost_result):
+def generate_routes(district, payload, cost_result, output_dir):
     script = (
         Path(__file__).resolve().parents[1]
         / "scripts"
@@ -325,10 +329,11 @@ def generate_routes(district, payload, cost_result):
         start=payload["start"],
         end=payload["end"],
         cost_result=cost_result,
+        output_dir=output_dir,
     )
 
 
-def run_impact_analysis(district, payload):
+def run_impact_analysis(district, payload, output_dir):
     """
     Connect the existing impact_analyzer.py to the backend pipeline.
 
@@ -358,7 +363,6 @@ def run_impact_analysis(district, payload):
 
     required_functions = [
         "load_routes",
-        "discover_cost_raster",
         "analyze_route",
         "build_comparison",
     ]
@@ -419,17 +423,15 @@ def run_impact_analysis(district, payload):
     routes = module.load_routes(
         district,
         construction,
+        route_file=output_dir / f"routes_{construction}.geojson",
     )
 
-    cost_path = module.discover_cost_raster(
-        district,
-        construction,
-    )
+    cost_path = output_dir / f"soft_cost_{construction}.tif"
 
     cost_raster = None
 
     try:
-        if cost_path is not None:
+        if cost_path.exists():
             import rasterio
             cost_raster = rasterio.open(cost_path)
 
@@ -477,10 +479,8 @@ def run_impact_analysis(district, payload):
         # ------------------------------------------------------------
         # Persist impact result for mitigation + report
         # ------------------------------------------------------------
-        impact_dir = OUTPUT_ROOT / "impacts" / district
-        impact_dir.mkdir(parents=True, exist_ok=True)
         
-        impact_file = impact_dir / f"impact_{construction}.json"
+        impact_file = output_dir / f"impact_{construction}.json"
         
         with open(impact_file, "w", encoding="utf-8") as f:
             json.dump(
@@ -521,7 +521,7 @@ def _read_json_file(path):
         return json.load(f)
 
 
-def run_mitigation_analysis(district, payload):
+def run_mitigation_analysis(district, payload, output_dir):
     """Run the existing local-first mitigation engine and return API-safe JSON."""
     project_root = Path(__file__).resolve().parents[2]
     script = project_root / "backend" / "scripts" / "mitigation_analyzer.py"
@@ -553,12 +553,8 @@ def run_mitigation_analysis(district, payload):
     construction = payload["constructionType"]
     district_dir = PROCESSED_ROOT / district
 
-    route_file = (
-        OUTPUT_ROOT / "routes" / district / f"routes_{construction}.geojson"
-    )
-    impact_file = (
-        OUTPUT_ROOT / "impacts" / district / f"impact_{construction}.json"
-    )
+    route_file = output_dir / f"routes_{construction}.geojson"
+    impact_file = output_dir / f"impact_{construction}.json"
 
     if not route_file.exists():
         raise FileNotFoundError(f"Route file not found: {route_file}")
@@ -633,9 +629,6 @@ def run_mitigation_analysis(district, payload):
             f"capacity={result['candidate_summary']['selected_capacity_m2']:,.1f} m²"
         )
 
-    output_dir = OUTPUT_ROOT / "mitigation" / district
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     output_json = output_dir / f"mitigation_{construction}.json"
     output_geojson = output_dir / f"mitigation_{construction}.geojson"
 
@@ -703,7 +696,7 @@ def run_mitigation_analysis(district, payload):
     }
 
 
-def run_report_generation(district, payload, impact_result, mitigation_result):
+def run_report_generation(district, payload, impact_result, mitigation_result, output_dir):
     project_root = Path(__file__).resolve().parents[2]
     script = project_root / "backend" / "scripts" / "report_generator.py"
 
@@ -719,7 +712,6 @@ def run_report_generation(district, payload, impact_result, mitigation_result):
         mitigation_result=mitigation_result,
     )
 
-    output_dir = OUTPUT_ROOT / "reports" / district
     written = module.write_report(report, output_dir)
 
     return {
@@ -732,14 +724,16 @@ def run_report_generation(district, payload, impact_result, mitigation_result):
     }
 
 
-def load_result_geojson(district, construction):
+def load_result_geojson(output_dir, construction):
     """Expose route geometry to the frontend without making the frontend read files."""
-    route_path = OUTPUT_ROOT / "routes" / district / f"routes_{construction}.geojson"
+    route_path = output_dir / f"routes_{construction}.geojson"
     if not route_path.exists():
         return None
     return _read_json_file(route_path)
 
 def run_project(project_id, payload):
+    output_dir = None
+
     try:
         _stage(
             project_id,
@@ -748,6 +742,7 @@ def run_project(project_id, payload):
         )
 
         validate_payload(payload)
+        output_dir = project_dir(project_id)
 
         _stage(
             project_id,
@@ -776,6 +771,7 @@ def run_project(project_id, payload):
         cost_result = run_cost_surface(
             district,
             payload,
+            output_dir,
         )
 
         _stage(
@@ -788,6 +784,7 @@ def run_project(project_id, payload):
             district,
             payload,
             cost_result,
+            output_dir,
         )
 
         _stage(
@@ -799,6 +796,7 @@ def run_project(project_id, payload):
         impact_result = run_impact_analysis(
             district,
             payload,
+            output_dir,
         )
 
         _stage(
@@ -810,6 +808,7 @@ def run_project(project_id, payload):
         mitigation_result = run_mitigation_analysis(
             district,
             payload,
+            output_dir,
         )
 
         _stage(
@@ -823,14 +822,16 @@ def run_project(project_id, payload):
             payload,
             impact_result,
             mitigation_result,
+            output_dir,
         )
 
         route_geojson = load_result_geojson(
-            district,
+            output_dir,
             payload["constructionType"],
         )
 
         result = {
+            "projectId": project_id,
             "project": payload,
             "district": district,
             "districtResolution": district_source,
@@ -872,3 +873,10 @@ def run_project(project_id, payload):
         )
 
         traceback.print_exc()
+
+    finally:
+        # The cost rasters are the only large files a run produces and
+        # nothing reads them once the report is written.
+        if output_dir is not None:
+            for raster in output_dir.glob("*.tif"):
+                raster.unlink(missing_ok=True)

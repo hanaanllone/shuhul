@@ -19,7 +19,7 @@ from .db import (
     init_db, create_user, get_user_by_email, get_user,
     create_project, get_project, list_projects, count_active_projects,
 )
-from .services.map_layers import register_map_layer_routes
+from .services.map_layers import register_map_layer_routes, build_project_corridors
 from .services.aoi_analysis import register_aoi_routes
 from .services.stress_analysis import register_stress_routes
 from .services.environmental_watch import register_environmental_watch_routes
@@ -246,6 +246,20 @@ def project_status(user, project_id):
         "result": project.get("result"),
     })
 
+
+@app.get("/api/projects/<project_id>/corridors")
+@login_required
+def project_corridors(user, project_id):
+    project = get_project(project_id, user["id"])
+    if not project:
+        return jsonify({"error": "Project not found."}), 404
+
+    payload = project["payload"]
+    width = float(request.args.get("width", payload.get("widthMeters", 20)))
+
+    return jsonify(
+        build_project_corridors(project_id, payload["constructionType"], width)
+    )
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=not IS_PRODUCTION)

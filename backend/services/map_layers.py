@@ -166,30 +166,31 @@ def _build_buildings_geojson(path):
     return json.loads(gdf.to_json())
 
 
-def _build_corridors_geojson(district, width_m):
+def build_project_corridors(project_id, construction, width_m):
+    """Buffer a project's own routes into construction corridors."""
     import geopandas as gpd
 
-    route_file = OUTPUT_ROOT / "routes" / district / "routes_road.geojson"
-    # Construction-specific file is preferred by the caller below.
+    route_file = (
+        OUTPUT_ROOT / "projects" / str(project_id)
+        / f"routes_{construction}.geojson"
+    )
+    empty = {"type": "FeatureCollection", "features": []}
+
     if not route_file.exists():
-        return {"type": "FeatureCollection", "features": []}
+        return empty
 
     routes = gpd.read_file(route_file)
     if routes.empty:
-        return {"type": "FeatureCollection", "features": []}
+        return empty
 
     if routes.crs is None:
         routes = routes.set_crs("EPSG:4326")
 
     # Buffer in a metric CRS. Project data uses UTM 43N.
     metric = routes.to_crs("EPSG:32643")
-    corridors = metric.copy()
-    corridors["geometry"] = metric.geometry.buffer(float(width_m) / 2.0)
-    corridors = corridors.to_crs("EPSG:4326")
+    metric["geometry"] = metric.geometry.buffer(float(width_m) / 2.0)
 
-    return json.loads(corridors.to_json())
-
-
+    return json.loads(metric.to_crs("EPSG:4326").to_json())
 
 
 def _render_combined_water_png(water_path, ndwi_path, max_dim=1600, threshold=0.20):
@@ -248,7 +249,6 @@ def register_map_layer_routes(app):
       GET /api/layers/<district>/manifest
       GET /api/layers/<district>/<layer>.png
       GET /api/layers/<district>/buildings
-      GET /api/layers/<district>/corridors?construction=road&width=20
     """
 
     @app.get("/api/layers/<district>/manifest")
@@ -331,41 +331,3 @@ def register_map_layer_routes(app):
             return jsonify(_build_buildings_geojson(buildings_path))
         except Exception as exc:
             return jsonify({"error": f"Could not load buildings: {exc}"}), 500
-
-    @app.get("/api/layers/<district>/corridors")
-    def map_layer_corridors(district):
-        from flask import request
-
-        construction = request.args.get("construction", "road")
-        width = float(request.args.get("width", 20))
-
-        route_file = (
-            OUTPUT_ROOT / "routes" / district
-            / f"routes_{construction}.geojson"
-        )
-
-        if not route_file.exists():
-            return jsonify({
-                "type": "FeatureCollection",
-                "features": [],
-            })
-
-        try:
-            import geopandas as gpd
-            routes = gpd.read_file(route_file)
-            if routes.empty:
-                return jsonify({
-                    "type": "FeatureCollection",
-                    "features": [],
-                })
-
-            if routes.crs is None:
-                routes = routes.set_crs("EPSG:4326")
-
-            metric = routes.to_crs("EPSG:32643")
-            metric["geometry"] = metric.geometry.buffer(width / 2.0)
-            result = metric.to_crs("EPSG:4326")
-
-            return jsonify(json.loads(result.to_json()))
-        except Exception as exc:
-            return jsonify({"error": f"Could not build corridors: {exc}"}), 500

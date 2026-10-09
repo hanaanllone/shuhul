@@ -442,17 +442,16 @@ export default function CreateProject({
   // Construction corridor is generated server-side from the actual Route A/B/C
   // geometries using widthMeters / 2 as the buffer radius.
   useEffect(() => {
-    if (!analysisResult?.district || !analysisResult?.project?.constructionType) return;
+    if (!analysisResult?.projectId) return;
 
-    const district = encodeURIComponent(analysisResult.district);
-    const construction = encodeURIComponent(analysisResult.project.constructionType);
+    const projectId = encodeURIComponent(analysisResult.projectId);
     const width = Number(
       analysisResult.project.widthMeters || widthMeters || 20
     );
     const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
     fetch(
-      `${apiBase}/api/layers/${district}/corridors?construction=${construction}&width=${encodeURIComponent(width)}`,
+      `${apiBase}/api/projects/${projectId}/corridors?width=${encodeURIComponent(width)}`,
       { credentials: "include" }
     )
       .then(async (response) => {
@@ -468,8 +467,7 @@ export default function CreateProject({
         setCorridorGeoJSON(null);
       });
   }, [
-    analysisResult?.district,
-    analysisResult?.project?.constructionType,
+    analysisResult?.projectId,
     analysisResult?.project?.widthMeters,
     widthMeters,
   ]);

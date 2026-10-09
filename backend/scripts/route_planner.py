@@ -480,6 +480,7 @@ def plan_routes(
     start_lng=None,
     end_lat=None,
     end_lng=None,
+    output_dir=None,
 ):
     """
     Programmatic routing API used by the Flask backend.
@@ -603,10 +604,16 @@ def plan_routes(
     # CONFIG
     # --------------------------------------------------------
 
-    config = load_config(
-        district,
-        construction
-    )
+    # The cost-surface stage returns the settings it was built with.
+    # Reading them from there, not from a shared file, keeps the
+    # settings of one project out of the routes of another.
+    if isinstance(cost_result, dict) and "soft_preferences" in cost_result:
+        config = cost_result
+    else:
+        config = load_config(
+            district,
+            construction
+        )
 
     soft = config["soft_preferences"]
 
@@ -822,12 +829,15 @@ def plan_routes(
         # OUTPUT
         # ----------------------------------------------------
 
-        output_dir = (
-            PROJECT_ROOT /
-            "outputs" /
-            "routes" /
-            district
-        )
+        if output_dir is None:
+            output_dir = (
+                PROJECT_ROOT /
+                "outputs" /
+                "routes" /
+                district
+            )
+
+        output_dir = Path(output_dir)
 
         output_dir.mkdir(
             parents=True,

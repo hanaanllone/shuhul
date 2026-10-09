@@ -118,10 +118,12 @@ def vector_path(district, name):
 # ROUTES
 # ============================================================
 
-def load_routes(district, construction):
+def load_routes(district, construction, route_file=None):
 
     path = (
-        ROUTES_DIR
+        Path(route_file)
+        if route_file is not None
+        else ROUTES_DIR
         / district
         / f"routes_{construction}.geojson"
     )
