@@ -338,11 +338,18 @@ export default function CreateProject({
 
   loadSavedProject();
 }, [projectId]);
+  // Raster layers come from the layer manifest, so a new layer on the
+  // server shows up here without a code change.
+  const [rasterOn, setRasterOn] = useState({});
+
+  const toggleRaster = (name) => {
+    setRasterOn((previous) => ({
+      ...previous,
+      [name]: !previous[name],
+    }));
+  };
+
   const [mapLayers, setMapLayers] = useState({
-    ndvi: false,
-    canopy: false,
-    water: false,
-    slope: false,
     buildings: false,
     routes: true,
     corridors: true,
@@ -386,12 +393,8 @@ export default function CreateProject({
     const district =
       analysisResult?.district ||
       analysisResult?.project?.district ||
-      analysisResult?.result?.district;
-
-    if (!district) {
-      setLayerManifest(null);
-      return;
-    }
+      analysisResult?.result?.district ||
+      "sxr";
 
     const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
     let cancelled = false;
@@ -472,12 +475,12 @@ export default function CreateProject({
     widthMeters,
   ]);
 
-  const rasterLayer = (name) => layerManifest?.layers?.[name] || null;
-  const rasterUrl = (name) => {
-    const layer = rasterLayer(name);
-    if (!layer?.url) return null;
+  const rasterLayers = Object.entries(layerManifest?.layers || {});
+  const layerUrl = (layer) => {
+    const path = layer.tiles || layer.url;
+    if (!path) return null;
     const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
-    return layer.url.startsWith("http") ? layer.url : `${apiBase}${layer.url}`;
+    return path.startsWith("http") ? path : `${apiBase}${path}`;
   };
 
   const updateParameter = (name, value) => {
@@ -1031,6 +1034,48 @@ return (
           font-weight: bold;
 
           margin-bottom: 8px;
+        }
+
+        .map-legend {
+          max-height: 62%;
+
+          overflow-y: auto;
+        }
+
+        .legend-block + .legend-block {
+          margin-top: 10px;
+
+          padding-top: 8px;
+
+          border-top: 1px solid rgba(23, 39, 95, 0.25);
+        }
+
+        .legend-swatch {
+          display: flex;
+
+          align-items: center;
+
+          gap: 6px;
+
+          margin: 2px 0;
+        }
+
+        .legend-swatch span {
+          flex: none;
+
+          width: 12px;
+
+          height: 12px;
+
+          border: 1px solid rgba(23, 39, 95, 0.35);
+        }
+
+        .legend-note {
+          margin-top: 4px;
+
+          font-size: 11px;
+
+          opacity: 0.75;
         }
 
         .legend-gradient {
@@ -1714,41 +1759,29 @@ return (
                       </BaseLayer>
                     </LayersControl>
 
-                    {mapLayers.ndvi && rasterLayer("ndvi") && (
-                      <ImageOverlay
-                        url={rasterUrl("ndvi")}
-                        bounds={rasterLayer("ndvi").bounds}
-                        opacity={0.58}
-                        zIndex={10}
-                      />
-                    )}
+                    {rasterLayers.map(([name, layer]) => {
+                      if (!rasterOn[name]) return null;
 
-                    {mapLayers.canopy && rasterLayer("canopy") && (
-                      <ImageOverlay
-                        url={rasterUrl("canopy")}
-                        bounds={rasterLayer("canopy").bounds}
-                        opacity={0.52}
-                        zIndex={11}
-                      />
-                    )}
-
-                    {mapLayers.water && rasterLayer("water") && (
-                      <ImageOverlay
-                        url={rasterUrl("water")}
-                        bounds={rasterLayer("water").bounds}
-                        opacity={0.68}
-                        zIndex={12}
-                      />
-                    )}
-
-                    {mapLayers.slope && rasterLayer("slope") && (
-                      <ImageOverlay
-                        url={rasterUrl("slope")}
-                        bounds={rasterLayer("slope").bounds}
-                        opacity={0.48}
-                        zIndex={9}
-                      />
-                    )}
+                      return layer.tiles ? (
+                        <TileLayer
+                          key={name}
+                          url={layerUrl(layer)}
+                          opacity={0.78}
+                          zIndex={10}
+                          minNativeZoom={layerManifest.min_zoom}
+                          maxNativeZoom={layerManifest.max_zoom}
+                          bounds={layerManifest.bounds}
+                        />
+                      ) : (
+                        <ImageOverlay
+                          key={name}
+                          url={layerUrl(layer)}
+                          bounds={layer.bounds}
+                          opacity={0.58}
+                          zIndex={10}
+                        />
+                      );
+                    })}
 
                     {mapLayers.buildings && buildingGeoJSON && (
                       <GeoJSON
@@ -1874,11 +1907,21 @@ return (
                       </div>
 
                       <div className="map-layer-list">
+                        {rasterLayers.map(([name, layer]) => (
+                          <button
+                            key={name}
+                            type="button"
+                            className={`map-layer-toggle ${rasterOn[name] ? "active" : ""}`}
+                            title={layer.note || layer.source || ""}
+                            onClick={() => toggleRaster(name)}
+                          >
+                            {layer.title || name}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="map-layer-list" style={{ marginTop: "8px" }}>
                         {[
-                          ["ndvi", "NDVI"],
-                          ["canopy", "Canopy"],
-                          ["water", "Water"],
-                          ["slope", "Slope"],
                           ["buildings", "Buildings"],
                           ["routes", "Routes A / B / C"],
                           ["corridors", "20 m Corridors"],
@@ -1929,20 +1972,52 @@ return (
 
                   {/* LEGEND */}
 
-                  <div className="map-legend">
+                  {rasterLayers.some(([name]) => rasterOn[name]) && (
+                    <div className="map-legend">
+                      {rasterLayers
+                        .filter(([name]) => rasterOn[name])
+                        .map(([name, layer]) => (
+                          <div key={name} className="legend-block">
+                            <div className="legend-title">
+                              {layer.title || name}
+                              {layer.legend?.unit ? ` (${layer.legend.unit})` : ""}
+                            </div>
 
-                    <div className="legend-title">
-                      NDVI
+                            {layer.legend?.type === "ramp" && (
+                              <>
+                                <div
+                                  className="legend-gradient"
+                                  style={{
+                                    background: `linear-gradient(to right, ${layer.legend.colors.join(", ")})`,
+                                  }}
+                                />
+                                <div className="legend-labels">
+                                  <span>{layer.legend.min}</span>
+                                  <span>{layer.legend.max}</span>
+                                </div>
+                              </>
+                            )}
+
+                            {layer.legend?.type === "swatches" && (
+                              <div>
+                                {layer.legend.items.map((item) => (
+                                  <div key={item.label} className="legend-swatch">
+                                    <span style={{ background: item.color }} />
+                                    {item.label}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {layer.confidence && (
+                              <div className="legend-note">
+                                Confidence: {layer.confidence}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                     </div>
-
-                    <div className="legend-gradient" />
-
-                    <div className="legend-labels">
-                      <span>Low</span>
-                      <span>High</span>
-                    </div>
-
-                  </div>
+                  )}
 
                 </div>
 

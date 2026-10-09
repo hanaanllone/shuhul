@@ -21,5 +21,6 @@ dist/
 
 # Local development state
 backend/.dev_secret_key
+backend/.dev_test_account
 *.db-wal
 *.db-shm

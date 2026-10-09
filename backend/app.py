@@ -29,6 +29,9 @@ from .services.environmental_watch_demo_route import (
 
 app = Flask(__name__)
 
+# Keep keys in the order they were written, so map layers list as registered.
+app.json.sort_keys = False
+
 register_aoi_routes(app)
 register_stress_routes(app)
 register_environmental_watch_routes(app)
@@ -47,7 +50,7 @@ CORS(app, origins=FRONTEND_ORIGINS, supports_credentials=True)
 init_db()
 
 # Everything under /api needs a signed-in user except these.
-PUBLIC_PREFIXES = ("/api/health", "/api/auth/")
+PUBLIC_PREFIXES = ("/api/health", "/api/auth/", "/api/tiles/")
 
 # Sign-in attempts allowed per address and email inside the window.
 LOGIN_ATTEMPTS = 10

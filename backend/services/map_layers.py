@@ -12,10 +12,39 @@ It does not alter the analysis/report pipeline.
 from pathlib import Path
 import io
 import json
+import re
 
 from flask import jsonify, send_file
 
-from ..config import PROCESSED_ROOT, OUTPUT_ROOT
+from ..config import PROCESSED_ROOT, OUTPUT_ROOT, TILE_BASE_URL
+from .layers import LAYERS
+
+LEGACY_TITLES = {
+    "ndvi": "Vegetation",
+    "water": "Water",
+    "canopy": "Canopy",
+    "slope": "Slope",
+}
+
+
+def _valid_district(district):
+    return re.fullmatch(r"[a-z0-9_-]+", district) is not None
+
+
+def _tile_manifest(district):
+    """Pre-built tile layers for a district, or None when it has not been tiled."""
+    path = PROCESSED_ROOT / district / "tiles" / "manifest.json"
+
+    if not path.exists():
+        return None
+
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+
+    for layer in manifest["layers"].values():
+        layer["available"] = True
+        layer["tiles"] = f"{TILE_BASE_URL}/{district}/{layer['tiles']}"
+
+    return manifest
 
 
 def _find_raster(district_dir, names, required=False):
@@ -247,12 +276,22 @@ def register_map_layer_routes(app):
     """
     Register:
       GET /api/layers/<district>/manifest
+      GET /api/tiles/<district>/<layer>/<z>/<x>/<y>.png
       GET /api/layers/<district>/<layer>.png
       GET /api/layers/<district>/buildings
     """
 
     @app.get("/api/layers/<district>/manifest")
     def map_layer_manifest(district):
+        if not _valid_district(district):
+            return jsonify({"error": "Unknown district"}), 404
+
+        # Districts with pre-built tiles are served from files. The rest
+        # fall back to rendering one image per layer on request.
+        tiled = _tile_manifest(district)
+        if tiled is not None:
+            return jsonify(tiled)
+
         district_dir = PROCESSED_ROOT / district
 
         rasters = {
@@ -276,6 +315,7 @@ def register_map_layer_routes(app):
 
             layers[name] = {
                 "available": True,
+                "title": LEGACY_TITLES[name],
                 "url": f"/api/layers/{district}/{name}.png",
                 "bounds": bounds,
             }
@@ -284,6 +324,22 @@ def register_map_layer_routes(app):
             "district": district,
             "layers": layers,
         })
+
+    @app.get("/api/tiles/<district>/<layer>/<int:z>/<int:x>/<int:y>.png")
+    def map_tile(district, layer, z, x, y):
+        if not _valid_district(district) or layer not in LAYERS:
+            return "", 404
+
+        path = (
+            PROCESSED_ROOT / district / "tiles" / layer
+            / str(z) / str(x) / f"{y}.png"
+        )
+
+        # Empty tiles are not stored. No content keeps the map quiet.
+        if not path.is_file():
+            return "", 204
+
+        return send_file(path, mimetype="image/png", max_age=86400)
 
     @app.get("/api/layers/<district>/<layer>.png")
     def map_layer_png(district, layer):
