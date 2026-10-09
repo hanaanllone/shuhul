@@ -1,0 +1,56 @@
+{
+  "article_id": "demo_bandipora_parks",
+  "relevant": true,
+  "issue": {
+    "title": "Proposed tree removal for public park construction in Sumbal",
+    "category": "urban_development",
+    "issue_type": "tree_removal",
+    "status": "proposed",
+    "description": "The Roads and Building Department Sumbal has invited tenders for cutting walnut and mulberry trees located on land where two public parks are under construction in Hilalabad Nesbal and Markundal. Local residents have raised concerns about the proposed removal, including a reported count of more than 70 walnut trees at Hilalabad Nesbal. Officials stated that the tree removal is being undertaken for construction of the public parks and described the step as being in the larger public interest."
+  },
+  "spatial_context": {
+    "named_places": [
+      "Sumbal",
+      "Hilalabad Nesbal",
+      "Markundal"
+    ],
+    "district": "Bandipora",
+    "district_code": "bnd",
+    "within_tshaai": true,
+    "location_verified": false
+  },
+  "environmental_factors": [
+    "tree_loss",
+    "vegetation_loss",
+    "green_space",
+    "land_use"
+  ],
+  "reported_claims": [
+    {
+      "claim": "There are over 70 walnut trees at Hilalabad Nesbal.",
+      "attributed_to": "local residents",
+      "status": "reported_claim",
+      "value": 70,
+      "unit": "trees"
+    },
+    {
+      "claim": "Trees will be cut for construction of public parks.",
+      "attributed_to": "Executive Engineer Mushtaq Ahmed",
+      "status": "source_stated_fact",
+      "value": null,
+      "unit": null
+    }
+  ],
+  "action": {
+    "title": "Assess the proposed park sites for tree conservation alternatives",
+    "description": "Assess existing vegetation and tree-cover data and identify whether park layouts or alternative site designs could reduce tree removal."
+  },
+  "confidence": "high",
+  "source": {
+    "title": "Proposed tree removal for public park construction in Sumbal",
+    "date": "July 16, 2024",
+    "publisher": "Kashmir News Trust",
+    "url": null,
+    "filename": "demo_bandipora_parks.txt"
+  }
+}
