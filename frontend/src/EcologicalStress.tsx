@@ -99,7 +99,8 @@ export default function EcologicalStress({
 
       try {
         const response = await fetch(
-          `${API}/api/stress/${districtCodes[district]}`
+          `${API}/api/stress/${districtCodes[district]}`,
+          { credentials: "include" }
         );
         const json = await response.json();
 

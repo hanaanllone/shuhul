@@ -1,42 +1,31 @@
-import os
 import threading
+import time
 import uuid
+from collections import defaultdict, deque
+from functools import wraps
 
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps
 
-try:
-    from .config import FRONTEND_ORIGIN
-    from .db import (
-        init_db, create_user, get_user_by_email, get_user,
-        create_project, update_project, get_project, list_projects
-    )
-    from .services.pipeline import run_project
-    from .services.map_layers import register_map_layer_routes
-    from .services.aoi_analysis import register_aoi_routes
-    from .services.stress_analysis import register_stress_routes
-    from .services.environmental_watch import register_environmental_watch_routes
-    from .services.environmental_watch_demo_route import (
-        register_environmental_watch_demo_route
-    )
-except ImportError:
-    from config import FRONTEND_ORIGIN
-    from db import (
-        init_db, create_user, get_user_by_email, get_user,
-        create_project, update_project, get_project, list_projects
-    )
-    from services.pipeline import run_project
-    from .services.map_layers import register_map_layer_routes
-    from services.aoi_analysis import register_aoi_routes
-    from services.stress_analysis import register_stress_routes
-    from services.environmental_watch import (
-        register_environmental_watch_routes,
-    )
-    from services.environmental_watch_demo_route import (
-        register_environmental_watch_demo_route
-    )
+from .config import (
+    FRONTEND_ORIGINS,
+    INLINE_WORKER,
+    IS_PRODUCTION,
+    MAX_ACTIVE_PROJECTS_PER_USER,
+    SECRET_KEY,
+)
+from .db import (
+    init_db, create_user, get_user_by_email, get_user,
+    create_project, get_project, list_projects, count_active_projects,
+)
+from .services.map_layers import register_map_layer_routes
+from .services.aoi_analysis import register_aoi_routes
+from .services.stress_analysis import register_stress_routes
+from .services.environmental_watch import register_environmental_watch_routes
+from .services.environmental_watch_demo_route import (
+    register_environmental_watch_demo_route
+)
 
 app = Flask(__name__)
 
@@ -44,18 +33,28 @@ register_aoi_routes(app)
 register_stress_routes(app)
 register_environmental_watch_routes(app)
 register_environmental_watch_demo_route(app)
+register_map_layer_routes(app)
+
 app.config.update(
-    SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-only-change-this"),
+    SECRET_KEY=SECRET_KEY,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    MAX_CONTENT_LENGTH=2 * 1024 * 1024,
 )
 
-CORS(app, origins=[FRONTEND_ORIGIN], supports_credentials=True)
+CORS(app, origins=FRONTEND_ORIGINS, supports_credentials=True)
 init_db()
-register_map_layer_routes(app)
-from .db import seed_test_user
-seed_test_user()
+
+# Everything under /api needs a signed-in user except these.
+PUBLIC_PREFIXES = ("/api/health", "/api/auth/")
+
+# Sign-in attempts allowed per address and email inside the window.
+LOGIN_ATTEMPTS = 10
+LOGIN_WINDOW_SECONDS = 15 * 60
+_login_attempts = defaultdict(deque)
+_login_lock = threading.Lock()
+
 
 def current_user():
     user_id = session.get("user_id")
@@ -69,6 +68,54 @@ def login_required(fn):
             return jsonify({"error": "authentication_required"}), 401
         return fn(user, *args, **kwargs)
     return wrapper
+
+_worker_started = False
+_worker_lock = threading.Lock()
+
+def ensure_inline_worker():
+    """
+    Start the in-process worker on the first request. Starting it here,
+    rather than at import, keeps it out of the reloader's parent process.
+    """
+    global _worker_started
+
+    if _worker_started:
+        return
+
+    with _worker_lock:
+        if _worker_started:
+            return
+        from .worker import work_forever
+        threading.Thread(target=work_forever, name="shuhul-worker", daemon=True).start()
+        _worker_started = True
+
+@app.before_request
+def require_session():
+    if INLINE_WORKER:
+        ensure_inline_worker()
+
+    path = request.path
+    if request.method == "OPTIONS" or not path.startswith("/api/"):
+        return None
+    if path.startswith(PUBLIC_PREFIXES):
+        return None
+    if not session.get("user_id"):
+        return jsonify({"error": "authentication_required"}), 401
+    return None
+
+def too_many_attempts(email):
+    """Record a sign-in attempt and say whether this caller is over the limit."""
+    key = (request.remote_addr or "unknown", email)
+    now = time.time()
+
+    with _login_lock:
+        attempts = _login_attempts[key]
+        while attempts and now - attempts[0] > LOGIN_WINDOW_SECONDS:
+            attempts.popleft()
+        if len(attempts) >= LOGIN_ATTEMPTS:
+            return True
+        attempts.append(now)
+        return False
 
 @app.get("/api/health")
 def health():
@@ -107,6 +154,11 @@ def login():
     body = request.get_json(silent=True) or {}
     email = str(body.get("email", "")).strip().lower()
     password = str(body.get("password", ""))
+
+    if too_many_attempts(email):
+        return jsonify({
+            "error": "Too many sign-in attempts. Please wait a few minutes."
+        }), 429
 
     user = get_user_by_email(email)
     if not user or not check_password_hash(user["password_hash"], password):
@@ -147,69 +199,29 @@ def project_detail(user, project_id):
     return jsonify(project)
 
 @app.post("/api/projects")
+@app.post("/api/projects/analyze")
 @login_required
 def start_project(user):
+    """
+    Queue a project for analysis. The worker picks it up from the
+    database, so a queued project survives a restart.
+    """
     body = request.get_json(silent=True) or {}
     project_name = (
         str(body.get("projectName", "Untitled Project")).strip()
         or "Untitled Project"
     )
+
+    if count_active_projects(user["id"]) >= MAX_ACTIVE_PROJECTS_PER_USER:
+        return jsonify({
+            "error": (
+                "You already have analyses running. "
+                "Wait for one to finish before starting another."
+            )
+        }), 429
 
     project_id = str(uuid.uuid4())
     create_project(project_id, user["id"], project_name, body)
-    update_project(
-        project_id,
-        status="queued",
-        stage="Queued for analysis",
-        progress=0,
-    )
-
-    thread = threading.Thread(
-        target=run_project,
-        args=(project_id, body),
-        daemon=True,
-    )
-    thread.start()
-
-    return jsonify({
-        "projectId": project_id,
-        "status": "queued",
-        "stage": "Queued for analysis",
-        "progress": 0,
-    }), 202
-
-@app.post("/api/projects/analyze")
-@login_required
-def analyze_compat(user):
-    body = request.get_json(silent=True) or {}
-
-    project_name = (
-        str(body.get("projectName", "Untitled Project")).strip()
-        or "Untitled Project"
-    )
-
-    project_id = str(uuid.uuid4())
-
-    create_project(
-        project_id,
-        user["id"],
-        project_name,
-        body,
-    )
-
-    update_project(
-        project_id,
-        status="queued",
-        stage="Queued for analysis",
-        progress=0,
-    )
-
-    thread = threading.Thread(
-        target=run_project,
-        args=(project_id, body),
-        daemon=True,
-    )
-    thread.start()
 
     return jsonify({
         "projectId": project_id,
@@ -234,5 +246,6 @@ def project_status(user, project_id):
         "result": project.get("result"),
     })
 
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=not IS_PRODUCTION)

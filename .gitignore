@@ -18,3 +18,8 @@ venv/
 # Frontend
 node_modules/
 dist/
+
+# Local development state
+backend/.dev_secret_key
+*.db-wal
+*.db-shm

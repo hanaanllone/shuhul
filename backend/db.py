@@ -1,164 +1,266 @@
-import sqlite3
-from .config import DATABASE_PATH
+from datetime import datetime, timedelta, timezone
+import json
 
-def connect():
+from sqlalchemy import (
+    Column,
+    ForeignKey,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    create_engine,
+    event,
+    func,
+    insert,
+    select,
+    update,
+)
+
+from .config import DATABASE_PATH, DATABASE_URL
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+if IS_SQLITE:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args={"timeout": 30} if IS_SQLITE else {},
+)
+
+if IS_SQLITE:
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(connection, _record):
+        # Write-ahead logging lets the API read while the worker writes.
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+metadata = MetaData()
+
+users = Table(
+    "users",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("email", String(320), nullable=False, unique=True),
+    Column("password_hash", Text, nullable=False),
+    Column("organisation", Text, nullable=False),
+    Column("name", Text),
+    Column("created_at", String(32), nullable=False),
+)
+
+projects = Table(
+    "projects",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id"), nullable=False, index=True),
+    Column("project_name", Text, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("status", String(16), nullable=False, default="queued", index=True),
+    Column("stage", Text, nullable=False, default="queued"),
+    Column("progress", Integer, nullable=False, default=0),
+    Column("result_json", Text),
+    Column("error", Text),
+    Column("created_at", String(32), nullable=False),
+    Column("updated_at", String(32), nullable=False),
+)
+
+ACTIVE_STATUSES = ("queued", "running")
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 
 def init_db():
-    conn = connect()
-    conn.executescript("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT NOT NULL UNIQUE,
-        password_hash TEXT NOT NULL,
-        organisation TEXT NOT NULL,
-        name TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
+    metadata.create_all(engine)
 
-    CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        project_name TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'queued',
-        stage TEXT NOT NULL DEFAULT 'queued',
-        progress INTEGER NOT NULL DEFAULT 0,
-        result_json TEXT,
-        error TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(user_id) REFERENCES users(id)
-    );
-    """)
-    conn.commit()
-    conn.close()
+
+# ------------------------------------------------------------
+# USERS
+# ------------------------------------------------------------
 
 def create_user(email, password_hash, organisation, name=None):
-    conn = connect()
-    try:
-        cur = conn.execute(
-            "INSERT INTO users(email,password_hash,organisation,name) VALUES(?,?,?,?)",
-            (email, password_hash, organisation, name),
+    with engine.begin() as conn:
+        result = conn.execute(
+            insert(users).values(
+                email=email,
+                password_hash=password_hash,
+                organisation=organisation,
+                name=name,
+                created_at=_now(),
+            )
         )
-        conn.commit()
-        return cur.lastrowid
-    finally:
-        conn.close()
+        return result.inserted_primary_key[0]
+
 
 def get_user_by_email(email):
-    conn = connect()
-    row = conn.execute(
-        "SELECT id,email,password_hash,organisation,name,created_at FROM users WHERE email=?",
-        (email,),
-    ).fetchone()
-    conn.close()
+    with engine.connect() as conn:
+        row = conn.execute(select(users).where(users.c.email == email)).mappings().first()
     return dict(row) if row else None
+
 
 def get_user(user_id):
-    conn = connect()
-    row = conn.execute(
-        "SELECT id,email,organisation,name,created_at FROM users WHERE id=?",
-        (user_id,),
-    ).fetchone()
-    conn.close()
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(
+                users.c.id,
+                users.c.email,
+                users.c.organisation,
+                users.c.name,
+                users.c.created_at,
+            ).where(users.c.id == user_id)
+        ).mappings().first()
     return dict(row) if row else None
 
+
+# ------------------------------------------------------------
+# PROJECTS
+# ------------------------------------------------------------
+
 def create_project(project_id, user_id, project_name, payload):
-    import json
-    conn = connect()
-    conn.execute(
-        "INSERT INTO projects(id,user_id,project_name,payload_json) VALUES(?,?,?,?)",
-        (project_id, user_id, project_name, json.dumps(payload)),
-    )
-    conn.commit()
-    conn.close()
+    now = _now()
+    with engine.begin() as conn:
+        conn.execute(
+            insert(projects).values(
+                id=project_id,
+                user_id=user_id,
+                project_name=project_name,
+                payload_json=json.dumps(payload),
+                status="queued",
+                stage="Queued for analysis",
+                progress=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
 
 def update_project(project_id, **fields):
-    import json
     allowed = {"status", "stage", "progress", "result_json", "error"}
-    updates, values = [], []
+    values = {}
+
     for key, value in fields.items():
         if key not in allowed:
             continue
         if key == "result_json" and not isinstance(value, str):
             value = json.dumps(value)
-        updates.append(f"{key}=?")
-        values.append(value)
-    if not updates:
+        values[key] = value
+
+    if not values:
         return
-    updates.append("updated_at=CURRENT_TIMESTAMP")
-    values.append(project_id)
-    conn = connect()
-    conn.execute(f"UPDATE projects SET {', '.join(updates)} WHERE id=?", values)
-    conn.commit()
-    conn.close()
+
+    values["updated_at"] = _now()
+    with engine.begin() as conn:
+        conn.execute(update(projects).where(projects.c.id == project_id).values(**values))
+
 
 def get_project(project_id, user_id):
-    import json
-    conn = connect()
-    row = conn.execute(
-        "SELECT * FROM projects WHERE id=? AND user_id=?",
-        (project_id, user_id),
-    ).fetchone()
-    conn.close()
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(projects).where(
+                projects.c.id == project_id,
+                projects.c.user_id == user_id,
+            )
+        ).mappings().first()
+
     if not row:
         return None
+
     item = dict(row)
     item["payload"] = json.loads(item.pop("payload_json"))
-    if item.get("result_json"):
-        item["result"] = json.loads(item.pop("result_json"))
-    else:
-        item.pop("result_json", None)
+    result_json = item.pop("result_json", None)
+    if result_json:
+        item["result"] = json.loads(result_json)
     return item
 
+
 def list_projects(user_id):
-    conn = connect()
-    rows = conn.execute(
-        """SELECT id,project_name,status,stage,progress,error,created_at,updated_at
-           FROM projects WHERE user_id=? ORDER BY created_at DESC""",
-        (user_id,),
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-def seed_test_user():
-    from werkzeug.security import generate_password_hash
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                projects.c.id,
+                projects.c.project_name,
+                projects.c.status,
+                projects.c.stage,
+                projects.c.progress,
+                projects.c.error,
+                projects.c.created_at,
+                projects.c.updated_at,
+            )
+            .where(projects.c.user_id == user_id)
+            .order_by(projects.c.created_at.desc())
+        ).mappings().all()
+    return [dict(row) for row in rows]
 
-    email = "test@shuhul.local"
-    password = "ShuhulTest123!"
-    organisation = "Shuhul Development"
-    name = "Shuhul Test User"
 
-    conn = connect()
+def count_active_projects(user_id):
+    with engine.connect() as conn:
+        return conn.execute(
+            select(func.count())
+            .select_from(projects)
+            .where(
+                projects.c.user_id == user_id,
+                projects.c.status.in_(ACTIVE_STATUSES),
+            )
+        ).scalar_one()
 
-    existing = conn.execute(
-        "SELECT id FROM users WHERE email=?",
-        (email,)
-    ).fetchone()
 
-    if existing:
-        conn.close()
-        return existing["id"]
+# ------------------------------------------------------------
+# JOB QUEUE
+# ------------------------------------------------------------
+#
+# The projects table is the queue. A queued project survives a restart
+# because it lives here and not in the arguments of a thread.
 
-    cur = conn.execute(
-        """
-        INSERT INTO users
-        (email, password_hash, organisation, name)
-        VALUES (?, ?, ?, ?)
-        """,
-        (
-            email,
-            generate_password_hash(password),
-            organisation,
-            name,
-        ),
-    )
+def claim_next_project():
+    """
+    Take the oldest queued project and mark it running.
+    Returns (project_id, payload), or None when nothing is waiting.
+    """
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(projects.c.id, projects.c.payload_json)
+            .where(projects.c.status == "queued")
+            .order_by(projects.c.created_at)
+            .limit(1)
+        ).first()
 
-    conn.commit()
-    user_id = cur.lastrowid
-    conn.close()
+        if row is None:
+            return None
 
-    return user_id
+        # The status check makes the claim safe when two workers race:
+        # only one of them changes a row.
+        claimed = conn.execute(
+            update(projects)
+            .where(projects.c.id == row.id, projects.c.status == "queued")
+            .values(status="running", stage="Starting analysis", updated_at=_now())
+        ).rowcount
+
+        if not claimed:
+            return None
+
+        return row.id, json.loads(row.payload_json)
+
+
+def fail_stale_projects(minutes=30):
+    """Mark analyses that a stopped worker left running as failed."""
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    ).isoformat(timespec="seconds")
+
+    with engine.begin() as conn:
+        return conn.execute(
+            update(projects)
+            .where(projects.c.status == "running", projects.c.updated_at < cutoff)
+            .values(
+                status="failed",
+                stage="Analysis failed",
+                progress=0,
+                error="The analysis was interrupted. Please run it again.",
+                updated_at=_now(),
+            )
+        ).rowcount
