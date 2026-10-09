@@ -43,7 +43,7 @@ DEFAULT_CANOPY_AREA_PER_TREE = 25.0
 def parse_args():
 
     parser = argparse.ArgumentParser(
-        description="Tshaai environmental impact analysis"
+        description="Shuhul environmental impact analysis"
     )
 
     parser.add_argument(
@@ -1400,7 +1400,7 @@ def main():
 
     print()
     print("=" * 70)
-    print("TSHAAY — ENVIRONMENTAL IMPACT ENGINE")
+    print("SHUHUL — ENVIRONMENTAL IMPACT ENGINE")
     print("=" * 70)
 
     print(f"District:              {district}")

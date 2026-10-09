@@ -1,13 +1,13 @@
 // frontend/src/auth/session.ts
 
-export interface TshaaiUser {
+export interface ShuhulUser {
   id?: number | string;
   email: string;
   organisation: string;
 }
 
 export interface AuthResponse {
-  user: TshaaiUser;
+  user: ShuhulUser;
   message?: string;
 }
 
@@ -21,7 +21,7 @@ export async function login(
   email: string,
   password: string,
   organisation: string
-): Promise<TshaaiUser> {
+): Promise<ShuhulUser> {
   const response = await fetch(`${API_BASE}/api/auth/login`, {
     method: "POST",
     headers: {
@@ -53,7 +53,7 @@ export async function signup(
   email: string,
   password: string,
   organisation: string
-): Promise<TshaaiUser> {
+): Promise<ShuhulUser> {
   const response = await fetch(`${API_BASE}/api/auth/signup`, {
     method: "POST",
     headers: {
@@ -81,7 +81,7 @@ export async function signup(
 /**
  * Ask the backend whether a user is currently logged in.
  */
-export async function getSession(): Promise<TshaaiUser | null> {
+export async function getSession(): Promise<ShuhulUser | null> {
   try {
     const response = await fetch(
       `${API_BASE}/api/auth/session`,

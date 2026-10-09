@@ -46,7 +46,7 @@ export default function Settings({ onNavigate, onLogout }: SettingsProps) {
       <main className="page">
         <div className="layout">
           <aside className="sidebar">
-            <div className="logo"><img src="/logo.png" alt="Tshaai" /></div>
+            <div className="logo"><img src="/logo.png" alt="Shuhul" /></div>
             <nav className="menu">
               {["Home","AOI Analysis","Environmental Watch","Ecological Stress","Thermal Compensation","Environmental Analysis","Settings"].map(item => (
                 <button

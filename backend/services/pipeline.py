@@ -130,7 +130,7 @@ def resolve_district(payload):
             break
 
     print("=" * 70)
-    print("TSHAAI DISTRICT POLYGON RESOLUTION")
+    print("SHUHUL DISTRICT POLYGON RESOLUTION")
     print("=" * 70)
     print(f"Location A district: {start_district}")
     print(f"Location B district: {end_district}")
@@ -235,7 +235,7 @@ def run_cost_surface(district, payload):
     from importlib.util import spec_from_file_location, module_from_spec
 
     spec = spec_from_file_location(
-        "tshaai_cost_surface",
+        "shuhul_cost_surface",
         script,
     )
 
@@ -306,7 +306,7 @@ def generate_routes(district, payload, cost_result):
     from importlib.util import spec_from_file_location, module_from_spec
 
     spec = spec_from_file_location(
-        "tshaai_route_planner",
+        "shuhul_route_planner",
         script,
     )
 
@@ -349,7 +349,7 @@ def run_impact_analysis(district, payload):
     from importlib.util import spec_from_file_location, module_from_spec
 
     spec = spec_from_file_location(
-        "tshaai_impact_analyzer",
+        "shuhul_impact_analyzer",
         script,
     )
 
@@ -409,7 +409,7 @@ def run_impact_analysis(district, payload):
 
     print()
     print("=" * 70)
-    print("TSHAAI — BACKEND IMPACT ANALYSIS")
+    print("SHUHUL — BACKEND IMPACT ANALYSIS")
     print("=" * 70)
     print(f"District:     {district}")
     print(f"Construction: {construction}")
@@ -532,7 +532,7 @@ def run_mitigation_analysis(district, payload):
     if not script.exists():
         raise RuntimeError("mitigation_analyzer.py is not present in backend/scripts.")
 
-    module = _load_module_from_path("tshaai_mitigation_analyzer", script)
+    module = _load_module_from_path("shuhul_mitigation_analyzer", script)
 
     required = [
         "first_existing",
@@ -599,7 +599,7 @@ def run_mitigation_analysis(district, payload):
 
     print()
     print("=" * 70)
-    print("TSHAAI — BACKEND MITIGATION ANALYSIS")
+    print("SHUHUL — BACKEND MITIGATION ANALYSIS")
     print("=" * 70)
     print(f"District:     {district}")
     print(f"Construction: {construction}")
@@ -710,7 +710,7 @@ def run_report_generation(district, payload, impact_result, mitigation_result):
     if not script.exists():
         raise RuntimeError("report_generator.py is not present in backend/scripts.")
 
-    module = _load_module_from_path("tshaai_report_generator", script)
+    module = _load_module_from_path("shuhul_report_generator", script)
 
     report = module.build_report(
         project_payload=payload,
@@ -758,7 +758,7 @@ def run_project(project_id, payload):
         district, district_source = resolve_district(payload)
 
         print("=" * 70)
-        print("TSHAAI DISTRICT RESOLUTION")
+        print("SHUHUL DISTRICT RESOLUTION")
         print("=" * 70)
         print(f"Start: {payload['start']}")
         print(f"End: {payload['end']}")

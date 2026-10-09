@@ -127,10 +127,10 @@ def list_projects(user_id):
 def seed_test_user():
     from werkzeug.security import generate_password_hash
 
-    email = "test@tshaai.local"
-    password = "TshaaiTest123!"
-    organisation = "Tshaai Development"
-    name = "Tshaai Test User"
+    email = "test@shuhul.local"
+    password = "ShuhulTest123!"
+    organisation = "Shuhul Development"
+    name = "Shuhul Test User"
 
     conn = connect()
 

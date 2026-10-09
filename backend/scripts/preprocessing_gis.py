@@ -15,7 +15,7 @@ import geopandas as gpd
 
 
 # ============================================================
-# TSHAAI - GIS PREPROCESSING
+# SHUHUL - GIS PREPROCESSING
 # ============================================================
 #
 # Raw structure:
@@ -245,7 +245,7 @@ def reproject_raster(
     dst_nodata=None,
 ):
     """
-    Reproject a raster onto the Tshaai master grid.
+    Reproject a raster onto the Shuhul master grid.
     """
 
     if source_path is None:
@@ -712,7 +712,7 @@ def main():
 
     print()
     print("=" * 70)
-    print("TSHAAI GIS PREPROCESSING PIPELINE")
+    print("SHUHUL GIS PREPROCESSING PIPELINE")
     print("=" * 70)
     print(f"Project root: {PROJECT_ROOT}")
     print(f"Raw data:     {RAW_DIR}")
@@ -761,7 +761,7 @@ def main():
 
     print()
     print("=" * 70)
-    print("TSHAAI PREPROCESSING SUMMARY")
+    print("SHUHUL PREPROCESSING SUMMARY")
     print("=" * 70)
 
     print(

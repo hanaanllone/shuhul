@@ -1,5 +1,5 @@
 # Static Environmental Watch demo route
-# Copy this file to Tshaai/backend/services/environmental_watch_demo_route.py
+# Copy this file to Shuhul/backend/services/environmental_watch_demo_route.py
 from pathlib import Path
 import json
 

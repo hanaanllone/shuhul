@@ -68,7 +68,7 @@ export default function App() {
   }
 
   if (checkingSession) {
-    return <div style={{ minHeight: "100vh", padding: 30 }}>Loading Tshaai...</div>;
+    return <div style={{ minHeight: "100vh", padding: 30 }}>Loading Shuhul...</div>;
   }
 
   if (!authenticated) {

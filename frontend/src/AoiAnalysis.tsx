@@ -1234,7 +1234,7 @@ export default function AOIAnalysis({
                       <strong>Methodology</strong>
                       <br />
 
-                      Values are calculated from the aligned Tshaai
+                      Values are calculated from the aligned Shuhul
                       environmental datasets clipped to the selected
                       district or custom AOI. NDVI and NDWI are
                       calculated from raster pixels within the AOI.

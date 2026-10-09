@@ -1,5 +1,5 @@
 """
-Tshaai — Visual Validation v3
+Shuhul — Visual Validation v3
 =============================
 
 Fixes:
@@ -735,7 +735,7 @@ def main():
     )
 
     print("=" * 78)
-    print("TSHAAI — VISUAL VALIDATION v3")
+    print("SHUHUL — VISUAL VALIDATION v3")
     print("=" * 78)
     print(f"District:       {district}")
     print(f"Construction:   {construction}")
@@ -1128,7 +1128,7 @@ def main():
         line-height: 1.45;
         max-width: 430px;
     ">
-      <b>Tshaai — Mitigation Visual Validation v3</b><br>
+      <b>Shuhul — Mitigation Visual Validation v3</b><br>
       {district.upper()} · {construction}<br>
       <span style="color:#ff3333">●</span> Route A
       &nbsp;

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 def analyze(path: Path, output_png: Path):
 
     print("\n" + "=" * 70)
-    print("TSHAAI COST SURFACE ANALYSIS")
+    print("SHUHUL COST SURFACE ANALYSIS")
     print("=" * 70)
 
     with rasterio.open(path) as src:
@@ -188,7 +188,7 @@ def analyze(path: Path, output_png: Path):
         )
 
         axes[0].set_title(
-            "Tshaai Environmental Cost Surface"
+            "Shuhul Environmental Cost Surface"
         )
 
         axes[0].set_xlabel("Column")
@@ -223,7 +223,7 @@ def analyze(path: Path, output_png: Path):
         )
 
         fig.suptitle(
-            f"Tshaai Cost Surface — {path.stem}",
+            f"Shuhul Cost Surface — {path.stem}",
             fontsize=15
         )
 
@@ -248,7 +248,7 @@ def analyze(path: Path, output_png: Path):
 def main():
 
     parser = argparse.ArgumentParser(
-        description="Analyze a Tshaai cost surface."
+        description="Analyze a Shuhul cost surface."
     )
 
     parser.add_argument(

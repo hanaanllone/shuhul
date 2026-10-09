@@ -129,7 +129,7 @@ export default function RecentWork({
       <main className="page">
         <div className="layout">
           <aside className="sidebar">
-            <div className="logo"><img src="/logo.png" alt="Tshaai" /></div>
+            <div className="logo"><img src="/logo.png" alt="Shuhul" /></div>
             <nav className="menu">
               {menuItems.map((item) => (
                 <button

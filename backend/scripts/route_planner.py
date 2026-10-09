@@ -950,7 +950,7 @@ def plan_routes(
 def main():
 
     parser = argparse.ArgumentParser(
-        description="Tshaai A→B Route Planner"
+        description="Shuhul A→B Route Planner"
     )
 
     parser.add_argument(
@@ -1283,7 +1283,7 @@ def main():
 
     print("\n")
     print("=" * 70)
-    print("TSHAAI ROUTE PLANNER")
+    print("SHUHUL ROUTE PLANNER")
     print("=" * 70)
 
     print(f"District:      {district}")

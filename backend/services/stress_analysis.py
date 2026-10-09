@@ -1,5 +1,5 @@
 """
-Tshaai Ecological Stress — identification only.
+Shuhul Ecological Stress — identification only.
 
 Generates a zone-level GeoJSON layer. It does not recommend interventions
 and does not change route planning.

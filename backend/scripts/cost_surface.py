@@ -6,7 +6,7 @@ import rasterio
 
 
 # ============================================================
-# TSHAAI - COST SURFACE
+# SHUHUL - COST SURFACE
 #
 # Produces:
 #   soft_cost_<construction>.tif
@@ -635,7 +635,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Build Tshaai soft cost surface and hard "
+            "Build Shuhul soft cost surface and hard "
             "constraint mask."
         )
     )
@@ -865,7 +865,7 @@ def main():
 
     print()
     print("=" * 70)
-    print("TSHAAI COST SURFACE")
+    print("SHUHUL COST SURFACE")
     print("=" * 70)
 
     print(f"District:             {args.district}")

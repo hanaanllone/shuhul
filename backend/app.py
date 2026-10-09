@@ -72,7 +72,7 @@ def login_required(fn):
 
 @app.get("/api/health")
 def health():
-    return jsonify({"ok": True, "service": "tshaai-api"})
+    return jsonify({"ok": True, "service": "shuhul-api"})
 
 @app.post("/api/auth/signup")
 def signup():

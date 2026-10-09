@@ -560,7 +560,7 @@ export default function EcologicalStress({
         <div className="stress-layout">
           <aside className="stress-sidebar">
             <div className="logo-container">
-              <img className="logo" src="/logo.png" alt="Tshaai" />
+              <img className="logo" src="/logo.png" alt="Shuhul" />
             </div>
 
             <nav className="stress-menu">

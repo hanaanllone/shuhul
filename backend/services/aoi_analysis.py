@@ -1,5 +1,5 @@
 """
-Tshaai AOI / district environmental analysis.
+Shuhul AOI / district environmental analysis.
 
 Calculates real spatial indicators from the already processed district data:
 
@@ -16,7 +16,7 @@ AOI input:
         [[south, west], [north, east]]
 
 All calculations are performed in the district's processed CRS
-(EPSG:32643 in the current Tshaai pipeline).
+(EPSG:32643 in the current Shuhul pipeline).
 
 Expected processed structure:
 
@@ -295,7 +295,7 @@ def _area_from_mask(mask: np.ndarray, transform) -> float:
     """
     Area in m² for pixels selected by mask.
 
-    The current Tshaai master grid is 10 m, but we derive pixel area
+    The current Shuhul master grid is 10 m, but we derive pixel area
     from the raster transform rather than assuming it.
     """
     pixel_area = abs(transform.a * transform.e)
@@ -345,7 +345,7 @@ def _combined_water_cover(
     geometry_projected,
 ):
     """
-    Tshaai's water interpretation:
+    Shuhul's water interpretation:
 
         explicit water mask
         OR
@@ -811,7 +811,7 @@ def generate_district_json(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = {
-        "generated_by": "Tshaai AOI environmental analysis",
+        "generated_by": "Shuhul AOI environmental analysis",
         "metrics": [
             "AREA",
             "MEAN NDVI",

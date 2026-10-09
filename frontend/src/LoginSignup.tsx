@@ -75,14 +75,14 @@ export default function LoginSignup({
 
       <section className="brand-panel">
         <div className="brand-block">
-          <span>Tshaai</span>
+          <span>Shuhul</span>
         </div>
 
         <img
           className="logo"
           src="/logo.png"
           width="125"
-          alt="Tshaai"
+          alt="Shuhul"
         />
 
         <div className="development-tag">

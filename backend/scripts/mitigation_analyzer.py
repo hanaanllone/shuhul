@@ -1,5 +1,5 @@
 """
-Tshaai - Mitigation Engine
+Shuhul - Mitigation Engine
 ==========================
 
 Finds local restoration opportunities around a proposed construction
@@ -1355,7 +1355,7 @@ def find_mitigation_for_route(
     Expand the search radius until we have enough local candidates.
 
     The search radius itself is part of the output so the UI can explain
-    how far Tshaai had to look.
+    how far Shuhul had to look.
     """
     last_result = None
 
@@ -1409,7 +1409,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Tshaai local-first mitigation and restoration-zone analyzer."
+            "Shuhul local-first mitigation and restoration-zone analyzer."
         )
     )
 
@@ -1625,7 +1625,7 @@ def main():
 
     print()
     print("=" * 78)
-    print("TSHAAI MITIGATION ENGINE")
+    print("SHUHUL MITIGATION ENGINE")
     print("=" * 78)
     print(f"District:             {args.district}")
     print(f"Construction:         {args.construction}")

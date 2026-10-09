@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 def analyze(path: Path, output_png: Path):
 
     print("\n" + "=" * 70)
-    print("TSHAAI HARD CONSTRAINT ANALYSIS")
+    print("SHUHUL HARD CONSTRAINT ANALYSIS")
     print("=" * 70)
 
     with rasterio.open(path) as src:
@@ -191,7 +191,7 @@ def analyze(path: Path, output_png: Path):
         )
 
         ax.set_title(
-            "Tshaai Hard Constraint Mask"
+            "Shuhul Hard Constraint Mask"
         )
 
         ax.set_xlabel("Column")
@@ -229,7 +229,7 @@ def analyze(path: Path, output_png: Path):
 def main():
 
     parser = argparse.ArgumentParser(
-        description="Analyze Tshaai hard constraint mask."
+        description="Analyze Shuhul hard constraint mask."
     )
 
     parser.add_argument(

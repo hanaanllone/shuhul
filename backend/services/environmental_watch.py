@@ -1,21 +1,21 @@
 """
-Tshaai Environmental Watch
+Shuhul Environmental Watch
 --------------------------
 
 Turns Kashmir environmental/infrastructure reporting into structured
-planning issues that can be linked to Tshaai's GIS workflow.
+planning issues that can be linked to Shuhul's GIS workflow.
 
 Current MVP:
     articles/ -> ingestion -> lightweight retrieval -> Strands/Bedrock
               -> validated EnvironmentalIssue -> Action Card
 
 The article corpus is intentionally kept outside this module:
-    Tshaai/articles/
+    Shuhul/articles/
 
 Important design rule:
     The LLM extracts and structures information. It does NOT decide
     whether a project should be built. Spatial measurements and
-    environmental calculations remain the responsibility of Tshaai's
+    environmental calculations remain the responsibility of Shuhul's
     deterministic GIS engine.
 """
 
@@ -36,19 +36,19 @@ from typing import Any, Iterable, Optional
 # ---------------------------------------------------------------------------
 
 # environmental_watch.py lives in:
-# Tshaai/backend/services/environmental_watch/
+# Shuhul/backend/services/environmental_watch/
 #
 # parents[0] = environmental_watch
 # parents[1] = services
 # parents[2] = backend
-# parents[3] = Tshaai
+# parents[3] = Shuhul
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ARTICLES_DIR = PROJECT_ROOT / "articles"
 WATCH_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "environmental_watch"
 
 
 # ---------------------------------------------------------------------------
-# Tshaai jurisdiction
+# Shuhul jurisdiction
 # ---------------------------------------------------------------------------
 
 DISTRICTS: dict[str, str] = {
@@ -177,7 +177,7 @@ class SpatialContext:
     named_places: list[str] = field(default_factory=list)
     district: Optional[str] = None
     district_code: Optional[str] = None
-    within_tshaai: Optional[bool] = None
+    within_shuhul: Optional[bool] = None
     location_verified: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -548,7 +548,7 @@ def build_jurisdiction_context(
         named_places=named_places or [],
         district=DISTRICT_DISPLAY_NAMES.get(code) if code else district,
         district_code=code,
-        within_tshaai=code is not None,
+        within_shuhul=code is not None,
         location_verified=False,
     )
 
@@ -558,7 +558,7 @@ def build_jurisdiction_context(
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """
-You are the Environmental Watch agent inside Tshaai, a spatial
+You are the Environmental Watch agent inside Shuhul, a spatial
 environmental planning system for Kashmir.
 
 Your task is to convert environmental and infrastructure reporting into a
@@ -570,16 +570,16 @@ Rules:
 2. Never invent facts, locations, numbers, dates, or sources.
 3. Preserve attribution for allegations, disputed figures, and claims.
 4. Never turn an allegation into an established fact.
-5. Identify environmental factors that Tshaai should investigate.
+5. Identify environmental factors that Shuhul should investigate.
 6. Identify the district only when the source supports it.
 7. If the district cannot be established, leave it unresolved.
-8. Tshaai covers these districts:
+8. Shuhul covers these districts:
    Anantnag, Budgam, Bandipora, Ganderbal, Kulgam, Kupwara,
    Pulwama, Shopian, Srinagar, and Baramulla.
 9. The agent must not decide that a project should or should not be built.
 10. The agent should create an investigation/action item, such as:
     "Conduct preliminary environmental route assessment."
-11. Numerical environmental measurements must come from Tshaai's GIS
+11. Numerical environmental measurements must come from Shuhul's GIS
     engine, not from the agent.
 12. Clearly distinguish:
     - source-reported claims
@@ -619,7 +619,7 @@ def _build_pydantic_models():
         named_places: list[str] = Field(default_factory=list)
         district: Optional[str] = None
         district_code: Optional[str] = None
-        within_tshaai: Optional[bool] = None
+        within_shuhul: Optional[bool] = None
         location_verified: bool = False
 
     class IssueModel(BaseModel):
@@ -660,7 +660,7 @@ def create_strands_agent():
 
     model_id = (
         __import__("os").environ.get(
-            "TSAAI_BEDROCK_MODEL_ID",
+            "SHUHUL_BEDROCK_MODEL_ID",
             "qwen.qwen3-coder-next",
         )
     )
@@ -697,7 +697,7 @@ def analyse_article_with_agent(
     )
 
     prompt = f"""
-Analyze this source article for Tshaai Environmental Watch.
+Analyze this source article for Shuhul Environmental Watch.
 
 SOURCE ARTICLE
 ---------------
@@ -721,7 +721,7 @@ Return a structured EnvironmentalIssue.
 For the spatial context:
 - extract named places explicitly mentioned in the article;
 - identify a district only when supported by the source;
-- map a supported district to its Tshaai district code;
+- map a supported district to its Shuhul district code;
 - do not claim that a location has been GIS-verified yet.
 
 For reported claims:
@@ -730,7 +730,7 @@ For reported claims:
 - do not collapse disputed values into one number.
 
 For the action:
-- create a concrete investigation task for Tshaai;
+- create a concrete investigation task for Shuhul;
 - do not recommend that government definitely approve or reject a project.
 """
 
@@ -792,7 +792,7 @@ def issue_to_action_card(
             "district": spatial.get("district"),
             "districtCode": spatial.get("district_code"),
             "places": spatial.get("named_places", []),
-            "withinTshaai": spatial.get("within_tshaai"),
+            "withinShuhul": spatial.get("within_shuhul"),
             "verified": spatial.get("location_verified", False),
         },
         "environmentalFactors": environmental_factors,
@@ -1010,7 +1010,7 @@ def register_environmental_watch_routes(app):
                 "article_id": article_id,
                 "hint": (
                     "Check Strands installation, AWS credentials, "
-                    "Bedrock model access, and TSAAI_BEDROCK_MODEL_ID."
+                    "Bedrock model access, and SHUHUL_BEDROCK_MODEL_ID."
                 ),
             }), 500
 
@@ -1019,7 +1019,7 @@ def register_environmental_watch_routes(app):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print("Tshaai Environmental Watch")
+    print("Shuhul Environmental Watch")
     print("=" * 60)
 
     if not ARTICLES_DIR.exists():
