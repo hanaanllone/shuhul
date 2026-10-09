@@ -136,6 +136,7 @@ def district_paths(district: str) -> Dict[str, Optional[Path]]:
         "canopy": _first_existing(
             district_dir,
             [
+                "tree_height.tif",
                 "canopy.tif",
                 "canopy.tiff",
                 "chm.tif",

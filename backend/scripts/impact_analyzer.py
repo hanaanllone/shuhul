@@ -114,6 +114,17 @@ def vector_path(district, name):
     return district_dir(district) / f"{name}.gpkg"
 
 
+def canopy_layer(district):
+    """
+    Tree canopy heights where they have been built. The raw canopy layer
+    carries a height on every vegetated cell, crops and grass included,
+    so it overstates canopy several times over.
+    """
+    if raster_path(district, "tree_height").exists():
+        return "tree_height"
+    return "canopy"
+
+
 # ============================================================
 # ROUTES
 # ============================================================
@@ -914,7 +925,7 @@ def analyze_route(
 
     canopy = open_raster(
         district,
-        "canopy"
+        canopy_layer(district)
     )
 
     slope = open_raster(

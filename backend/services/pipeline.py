@@ -567,7 +567,7 @@ def run_mitigation_analysis(district, payload, output_dir):
     ndwi_path = module.first_existing(district_dir, ["ndwi.tif", "ndwi"])
     water_path = module.first_existing(district_dir, ["water.tif", "water"])
     canopy_path = module.first_existing(
-        district_dir, ["canopy.tif", "canopy", "chm.tif", "chm"]
+        district_dir, ["tree_height.tif", "canopy.tif", "canopy", "chm.tif", "chm"]
     )
     buildings_path = module.first_existing(
         district_dir, ["buildings.gpkg", "buildings"]

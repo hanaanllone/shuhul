@@ -323,6 +323,7 @@ def build_cost_surface(
             "road",
         ])
         canopy = layer([
+            "tree_height",
             "canopy",
             "chm",
             "CHM",
@@ -396,7 +397,7 @@ def build_cost_surface(
     # --------------------------------------------------------
 
     building_cost = (
-        normalize(buildings)
+        normalize(buildings, 0, 1)
         if buildings is not None
         else np.zeros_like(ndvi)
     )

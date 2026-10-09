@@ -1561,7 +1561,7 @@ def main():
 
     canopy_path = first_existing(
         district_dir,
-        ["canopy.tif", "canopy", "chm.tif", "chm"],
+        ["tree_height.tif", "canopy.tif", "canopy", "chm.tif", "chm"],
     )
 
     buildings_path = first_existing(
