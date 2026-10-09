@@ -1,0 +1,20 @@
+# Data stays on disk and in S3, not in git
+rawdata/
+processed/
+outputs/
+*.tif
+*.tiff
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local state and secrets
+*.db
+.env
+
+# Frontend
+node_modules/
+dist/
