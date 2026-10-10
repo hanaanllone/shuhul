@@ -3,6 +3,7 @@
 .landing {
   height: 100vh;
   overflow-y: auto;
+  scroll-behavior: smooth;
   scroll-snap-type: y proximity;
 }
 
@@ -10,6 +11,30 @@
   position: relative;
   min-height: 100vh;
   scroll-snap-align: start;
+}
+
+/* The content of a section eases in as the section comes into view. */
+.landing.is-animated .reveal {
+  opacity: 0;
+  transform: translateY(36px);
+  transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.landing.is-animated .is-in-view .reveal {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing {
+    scroll-behavior: auto;
+  }
+
+  .landing.is-animated .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }
 
 .landing-nav {
@@ -192,7 +217,90 @@
   text-align: right;
 }
 
+/* ---------- Landing: about us ---------- */
+
+.landing-about {
+  display: flex;
+  flex-direction: column;
+  padding: 26px var(--page-x) 60px;
+  background: var(--forest-950);
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: clamp(28px, 6vw, 96px);
+  margin: auto 0;
+  padding-top: 32px;
+}
+
+.about-title {
+  margin-bottom: 28px;
+  font-size: clamp(40px, 6vw, 92px);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.team {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  gap: 24px;
+}
+
+.person img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: var(--radius-lg);
+  object-fit: cover;
+}
+
+.person h3 {
+  margin-top: 14px;
+  font-size: 18px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.person-role {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sage);
+}
+
+.person a {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--muted-on-dark);
+  overflow-wrap: anywhere;
+}
+
+.person a:hover {
+  color: var(--ivory);
+}
+
+.about-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 60ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--sage-soft);
+}
+
 @media (max-width: 900px) {
+  .about-grid {
+    grid-template-columns: 1fr;
+  }
+
   .hero-words {
     grid-template-columns: 1fr;
     grid-template-areas: "lead" "planning" "environment" "development";
