@@ -294,6 +294,10 @@ def build_cost_surface(
     hard_water=False,
     hard_forest=False,
 
+    # Lakes and rivers can be forbidden on their own. hard_water forbids both.
+    hard_lakes=False,
+    hard_rivers=False,
+
     heat_priority=0.5,
     flood_priority=0.5,
 
@@ -342,6 +346,8 @@ def build_cost_surface(
 
         slope = layer(["slope"])
         water = layer(["water"])
+        lakes = layer(["water_lakes"])
+        rivers = layer(["water_rivers"])
         ndwi = layer(["ndwi"])
         buildings = layer([
             "buildings",
@@ -584,6 +590,20 @@ def build_cost_surface(
                 "but no water raster was found."
             )
 
+    # Lakes and wetlands, rivers and canals: the mapped outlines, so the
+    # weed-covered parts of a lake count as lake.
+    for requested, mapped, name in (
+        (hard_lakes, lakes, "lakes"),
+        (hard_rivers, rivers, "rivers"),
+    ):
+        if not requested:
+            continue
+
+        if mapped is not None:
+            hard_mask[np.isfinite(mapped) & (mapped > 0)] = 1
+        else:
+            print(f"WARNING: hard {name} requested, but no mapped {name} were found.")
+
     # Forest
     if hard_forest:
 
@@ -725,6 +745,8 @@ def build_cost_surface(
         "hard_constraints": {
             "heritage": hard_heritage,
             "water": hard_water,
+            "lakes": hard_lakes,
+            "rivers": hard_rivers,
             "forest": hard_forest,
             "flood": hard_flood,
             "steep_slope": hard_steep,

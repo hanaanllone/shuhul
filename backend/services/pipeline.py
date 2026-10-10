@@ -281,6 +281,8 @@ def run_cost_surface(district, payload, output_dir):
         ) / 100,
         hard_heritage=bool(hard.get("heritage")),
         hard_water=bool(hard.get("water")),
+        hard_lakes=bool(hard.get("lakes")),
+        hard_rivers=bool(hard.get("rivers")),
         hard_forest=bool(hard.get("forest")),
         heat_priority=float(
             prefs.get("heatPriority", 50)
@@ -935,12 +937,21 @@ def run_project(project_id, payload):
         )
 
     except Exception as exc:
+        message = str(exc)
+        # The router's own wording means nothing to a planner.
+        if "no minimum-cost path" in message:
+            message = (
+                "No route is possible within these limits. The two points are cut off "
+                "from each other by land that must never be built on, such as a river. "
+                "Lift a limit or move a point."
+            )
+
         update_project(
             project_id,
             status="failed",
             stage="Analysis failed",
             progress=0,
-            error=str(exc),
+            error=message,
         )
 
         traceback.print_exc()
