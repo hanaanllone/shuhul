@@ -57,11 +57,20 @@ services:
       context: .
       dockerfile: deploy/web.Dockerfile
     restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      # Certificates are kept, so a restart does not ask for new ones.
+      - web_data:/data
+      - web_config:/config
     depends_on:
       - api
 
 volumes:
   db:
   outputs:
+  web_data:
+  web_config:

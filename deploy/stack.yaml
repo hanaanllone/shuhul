@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Shuhul on one EC2 machine behind CloudFront. The machine runs the database,
-  API, worker and website with Docker Compose. It takes the code and the
-  processed dataset from S3, and picks up a new code archive by itself
-  within a few minutes of it being uploaded.
+  Shuhul on one EC2 machine with a fixed address. The machine runs the
+  database, API, worker and website with Docker Compose and serves HTTPS
+  itself. It takes the code and the processed dataset from S3, and picks up
+  a new code archive by itself within a few minutes of it being uploaded.
 
 Parameters:
   DataBucket:
@@ -15,17 +15,29 @@ Parameters:
     Type: String
     Default: release/shuhul.tar.gz
     Description: Where in the bucket the code archive is (made with git archive).
-  CloudFrontPrefixList:
+  SiteHost:
     Type: String
+    Default: ""
     Description: >
-      Id of the managed prefix list com.amazonaws.global.cloudfront.origin-facing
-      in this region, so that only CloudFront can reach the machine.
+      Host name the site is served at, if you have one pointing at this
+      machine. Left empty, a name is made from the machine's address with
+      sslip.io, a public service that resolves 1-2-3-4.sslip.io to 1.2.3.4.
   InstanceType:
     Type: String
-    Default: t3.medium
+    Default: c7i-flex.large
+    Description: >
+      2 vCPU and 4 GB is enough. An account on the AWS Free plan can only
+      start the types marked free-tier eligible, which this one is.
+  CpuCredits:
+    Type: String
+    Default: none
+    AllowedValues: [none, standard, unlimited]
+    Description: >
+      For burstable types (t3, t4g and so on) only. Choose standard so a busy
+      spell slows the machine instead of adding charges. Leave as none otherwise.
   PowerOffAt:
     Type: String
-    Default: "2026-10-17 18:30:00"
+    Default: "2026-10-16 06:30:00"
     Description: >
       When the machine switches itself off, in UTC, so that a forgotten
       stack stops costing money. Only the disk is charged after that.
@@ -36,6 +48,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Model or inference profile for analysing reports. Empty keeps it off.
+
+Conditions:
+  SetCpuCredits: !Not [!Equals [!Ref CpuCredits, none]]
+  OwnHost: !Not [!Equals [!Ref SiteHost, ""]]
 
 Resources:
   # ---------- What the machine is allowed to do ----------
@@ -89,13 +105,34 @@ Resources:
   WebSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Shuhul website, reachable from CloudFront only
+      GroupDescription: Shuhul website
       SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS
+        # Port 80 only redirects to HTTPS and answers certificate checks.
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          SourcePrefixListId: !Ref CloudFrontPrefixList
-          Description: CloudFront edge servers
+          CidrIp: 0.0.0.0/0
+          Description: HTTP redirect
+
+  # A fixed address, so the site keeps its name when the machine restarts.
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: shuhul
+
+  ElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      InstanceId: !Ref Instance
 
   Instance:
     Type: AWS::EC2::Instance
@@ -105,9 +142,10 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       SecurityGroupIds:
         - !GetAtt WebSecurityGroup.GroupId
-      # Standard credits: a busy spell slows the machine instead of adding charges.
-      CreditSpecification:
-        CPUCredits: standard
+      CreditSpecification: !If
+        - SetCpuCredits
+        - CPUCredits: !Ref CpuCredits
+        - !Ref AWS::NoValue
       InstanceInitiatedShutdownBehavior: stop
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
@@ -145,9 +183,16 @@ Resources:
 
           mkdir -p /srv/shuhul /srv/shuhul-data/processed
 
+          # The name the site answers to: the one given, or one made from the address.
+          SITE_HOST="${SiteHost}"
+          if [ -z "$SITE_HOST" ]; then
+            SITE_HOST="$(echo ${ElasticIp} | tr . -).sslip.io"
+          fi
+
           (
           umask 077
           cat > /srv/shuhul/.env <<EOF
+          SITE_ADDRESS=$SITE_HOST
           SHUHUL_SECRET_KEY=$(openssl rand -hex 32)
           POSTGRES_PASSWORD=$(openssl rand -hex 16)
           SHUHUL_DATA_DIR=/srv/shuhul-data/processed
@@ -240,56 +285,13 @@ Resources:
           cat /var/log/shuhul-release.log
           echo "Shuhul setup finished"
 
-  # ---------- HTTPS and caching in front of it ----------
-  Distribution:
-    Type: AWS::CloudFront::Distribution
-    Properties:
-      DistributionConfig:
-        Enabled: true
-        Comment: Shuhul
-        HttpVersion: http2
-        PriceClass: PriceClass_200
-        Origins:
-          - Id: app
-            DomainName: !GetAtt Instance.PublicDnsName
-            CustomOriginConfig:
-              OriginProtocolPolicy: http-only
-              HTTPPort: 80
-              OriginReadTimeout: 60
-        # Pages: always fresh, so a new release shows at once.
-        DefaultCacheBehavior:
-          TargetOriginId: app
-          ViewerProtocolPolicy: redirect-to-https
-          AllowedMethods: [GET, HEAD, OPTIONS]
-          Compress: true
-          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled
-        CacheBehaviors:
-          # Map tiles are the same for everyone and change only on a rebuild.
-          - PathPattern: /api/tiles/*
-            TargetOriginId: app
-            ViewerProtocolPolicy: redirect-to-https
-            AllowedMethods: [GET, HEAD]
-            Compress: true
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized
-          # Everything else under /api is per user and never cached.
-          - PathPattern: /api/*
-            TargetOriginId: app
-            ViewerProtocolPolicy: redirect-to-https
-            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled
-            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3 # AllViewer
-          # Built files carry a hash in their name.
-          - PathPattern: /assets/*
-            TargetOriginId: app
-            ViewerProtocolPolicy: redirect-to-https
-            AllowedMethods: [GET, HEAD]
-            Compress: true
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized
-
 Outputs:
   SiteUrl:
     Description: Where Shuhul is served.
-    Value: !Sub https://${Distribution.DomainName}
+    Value: !If
+      - OwnHost
+      - !Sub https://${SiteHost}
+      - !Join ["", ["https://", !Join ["-", !Split [".", !Ref ElasticIp]], ".sslip.io"]]
   InstanceId:
     Value: !Ref Instance
   SetupLog:

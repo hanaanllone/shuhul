@@ -1,25 +1,34 @@
 # Putting Shuhul on AWS
 
 One EC2 machine runs everything with Docker Compose: the database, the API,
-the worker and the website. CloudFront sits in front of it for HTTPS and for
-caching map tiles. The processed dataset and the code archive live in S3,
-and the machine copies both when it first starts.
+the worker and the website, which serves HTTPS itself. The processed dataset
+and the code archive live in S3. The machine copies both when it first
+starts, and again whenever a new archive is uploaded.
 
 ```
-browser ──HTTPS──> CloudFront ──HTTP──> EC2  (web → api, worker, db)
-                                         ▲
-                              S3: processed/  release/shuhul.tar.gz
+browser ──HTTPS──> EC2  (web → api, worker, db)
+                    ▲
+         S3: processed/  release/shuhul.tar.gz  logs/status.txt
 ```
 
-Cost while it is up: one `t3.medium`, a 30 GB disk, a few GB in S3 and
-CloudFront traffic, about 1.30 USD a day in Mumbai. The machine switches
+Cost while it is up: one `c7i-flex.large`, a 30 GB disk, one public address
+and a few GB in S3, about 2.25 USD a day in Mumbai. The machine switches
 itself off at the time given by the `PowerOffAt` parameter, after which only
-the disk is charged. Delete the stack when it is no longer needed.
+the disk and the address are charged. Delete the stack when it is no longer
+needed.
+
+An account on the AWS Free plan can only start instance types marked
+free-tier eligible. List them with:
+
+```bash
+aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true \
+  --query "InstanceTypes[].InstanceType" --output text
+```
 
 ## Before you start
 
-- AWS CLI v2, signed in as a user who can use S3, EC2, CloudFront and
-  CloudFormation, and can create the `shuhul-ec2` role
+- AWS CLI v2, signed in as a user who can use S3, EC2 and CloudFormation,
+  and can create the `shuhul-ec2` role
   (`deploy/iam-shuhul-roles.json` is a policy that allows just that).
 - The processed dataset in `processed/`.
 - Everything you want deployed is committed: the archive is made from the
@@ -48,23 +57,29 @@ To upload only some districts, name them: `bash deploy/upload.sh $BUCKET sxr sr-
 ## 2. Create the stack
 
 ```bash
-PREFIX_LIST=$(aws ec2 describe-managed-prefix-lists \
-  --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing \
-  --query "PrefixLists[0].PrefixListId" --output text)
-
 aws cloudformation deploy \
   --stack-name shuhul \
   --template-file deploy/stack.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides DataBucket=$BUCKET CloudFrontPrefixList=$PREFIX_LIST
+  --parameter-overrides DataBucket=$BUCKET
 
 aws cloudformation describe-stacks --stack-name shuhul \
   --query "Stacks[0].Outputs" --output table
 ```
 
-The stack takes about ten minutes, most of it CloudFront. The machine then
-needs roughly another ten to install Docker, copy the dataset and build the
-images. `SiteUrl` in the outputs is the address.
+The stack takes a few minutes. The machine then needs roughly another ten to
+install Docker, copy the dataset and build the images. `SiteUrl` in the
+outputs is the address.
+
+### The address
+
+With nothing else said, the site is served at a name made from the machine's
+address, such as `https://13-234-56-78.sslip.io`. sslip.io is a public
+service that resolves such names to the address inside them, which lets the
+web server get an HTTPS certificate without a domain of your own.
+
+If you have a domain, point it at the machine and pass it:
+`--parameter-overrides DataBucket=$BUCKET SiteHost=maps.example.org`.
 
 To watch the first start:
 
@@ -93,18 +108,13 @@ The same file is refreshed every fifteen minutes.
 ## Turning on report analysis
 
 Reading news reports with a language model uses Amazon Bedrock. Once the
-account has model access, pass the model or inference profile id:
-
-```bash
-aws cloudformation deploy --stack-name shuhul --template-file deploy/stack.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides DataBucket=$BUCKET CloudFrontPrefixList=$PREFIX_LIST BedrockModelId=<id>
-```
-
-Changing this parameter replaces the machine, so projects and accounts made
-on the old one are lost. To keep them, open a shell on the machine with
+account has model access, open a shell on the machine with
 `aws ssm start-session --target <InstanceId>`, set `SHUHUL_BEDROCK_MODEL_ID`
 in `/srv/shuhul/.env` and run `docker compose up -d` in `/srv/shuhul`.
+
+Passing `BedrockModelId` to the stack does the same for a new machine, but
+on an existing stack it replaces the machine, and the accounts and projects
+on it are lost.
 
 ## Taking it down
 
@@ -115,16 +125,17 @@ aws s3 rb s3://$BUCKET --force
 
 ## What to know
 
-- The link between CloudFront and the machine is plain HTTP. Visitors always
-  get HTTPS, but for anything beyond a demonstration the machine should have
-  its own certificate and domain.
 - The database is a container on the same disk. Deleting the stack deletes
   the accounts and projects in it.
-- The machine's address changes if it is stopped and started, which
-  includes the automatic switch-off, and CloudFront would then point at the
-  old one. To bring it back, start the machine and update the stack.
-- The machine runs on standard CPU credits, so a long busy spell slows it
-  down instead of adding to the bill.
+- The site keeps its address when the machine is stopped and started, which
+  includes the automatic switch-off. Start it again from the EC2 console or
+  with `aws ec2 start-instances --instance-ids <InstanceId>`.
+- With a burstable instance type such as `t3.small`, pass
+  `CpuCredits=standard` so a long busy spell slows the machine down instead
+  of adding to the bill.
+- A new AWS account that has not been verified yet cannot create CloudFront
+  distributions or call Bedrock, which is why this setup needs neither to
+  serve the site.
 - `docker-compose.yml` runs the app in production mode, where sign-in needs
   HTTPS. For work on your own computer use the development servers described
   in the main README.

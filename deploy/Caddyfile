@@ -1,5 +1,6 @@
-# Plain HTTP on port 80. HTTPS ends at CloudFront, in front of this.
-:80 {
+# The address comes from SITE_ADDRESS. Given a host name, Caddy fetches and
+# renews an HTTPS certificate for it by itself. ":80" means plain HTTP.
+{$SITE_ADDRESS::80} {
 	encode gzip
 
 	handle /api/* {

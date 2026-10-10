@@ -24,9 +24,13 @@ FRONTEND_ORIGINS = [
 ]
 DEFAULT_DISTRICT = os.getenv("SHUHUL_DEFAULT_DISTRICT", "sxr")
 
-# Where the browser fetches map tiles from. The API serves them in
-# development; in production this points at the CDN in front of S3.
+# Where the browser fetches map tiles from. The API serves them unless
+# this points somewhere else, such as a CDN.
 TILE_BASE_URL = os.getenv("SHUHUL_TILE_BASE_URL", "/api/tiles").rstrip("/")
+
+# Session cookies travel over HTTPS only in production. Set to 0 only when
+# the site has to be served over plain HTTP.
+COOKIE_SECURE = os.getenv("SHUHUL_COOKIE_SECURE", "1" if IS_PRODUCTION else "0") == "1"
 
 # In development the API runs queued analyses itself. In production a
 # separate worker process does (python -m backend.worker).

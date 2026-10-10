@@ -9,6 +9,7 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from .config import (
+    COOKIE_SECURE,
     OUTPUT_ROOT,
     FRONTEND_ORIGINS,
     INLINE_WORKER,
@@ -52,7 +53,7 @@ app.config.update(
     SECRET_KEY=SECRET_KEY,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    SESSION_COOKIE_SECURE=COOKIE_SECURE,
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
 )
 

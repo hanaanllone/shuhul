@@ -156,9 +156,10 @@ python backend/scripts/build_map_tiles.py --district sxr
 ## On AWS
 
 One EC2 machine runs the database, API, worker and website with Docker
-Compose. CloudFront serves it over HTTPS and caches the map tiles, and the
-dataset is kept in S3. `deploy/README.md` has the steps and
-`deploy/stack.yaml` creates it in one command.
+Compose and serves HTTPS itself. The dataset and each release of the code are
+kept in S3, and the machine picks a new release up by itself.
+`deploy/README.md` has the steps and `deploy/stack.yaml` creates it in one
+command.
 
 ## Layout
 
