@@ -11,8 +11,10 @@ browser ──HTTPS──> CloudFront ──HTTP──> EC2  (web → api, worke
                               S3: processed/  release/shuhul.tar.gz
 ```
 
-Cost while it is up: one `t3.large`, a 40 GB disk, a few GB in S3 and
-CloudFront traffic. Delete the stack when it is no longer needed.
+Cost while it is up: one `t3.medium`, a 30 GB disk, a few GB in S3 and
+CloudFront traffic, about 1.30 USD a day in Mumbai. The machine switches
+itself off at the time given by the `PowerOffAt` parameter, after which only
+the disk is charged. Delete the stack when it is no longer needed.
 
 ## Before you start
 
@@ -76,18 +78,17 @@ It ends with `Shuhul setup finished`.
 
 ```bash
 bash deploy/upload.sh $BUCKET
-aws ssm start-session --target <InstanceId>
 ```
 
-Then, on the machine:
+That is all. Every three minutes the machine checks the archive in the
+bucket; when it has changed it fetches the code and any new data and
+rebuilds. To see how that went, and what the app is doing:
 
 ```bash
-sudo -i
-aws s3 cp s3://<bucket>/release/shuhul.tar.gz /tmp/shuhul.tar.gz
-tar -xzf /tmp/shuhul.tar.gz -C /srv/shuhul
-aws s3 sync s3://<bucket>/processed /srv/shuhul-data/processed
-cd /srv/shuhul && docker compose up -d --build
+aws s3 cp s3://$BUCKET/logs/status.txt -
 ```
+
+The same file is refreshed every fifteen minutes.
 
 ## Turning on report analysis
 
@@ -101,8 +102,9 @@ aws cloudformation deploy --stack-name shuhul --template-file deploy/stack.yaml 
 ```
 
 Changing this parameter replaces the machine, so projects and accounts made
-on the old one are lost. To keep them, set `SHUHUL_BEDROCK_MODEL_ID` in
-`/srv/shuhul/.env` on the machine instead and run `docker compose up -d`.
+on the old one are lost. To keep them, open a shell on the machine with
+`aws ssm start-session --target <InstanceId>`, set `SHUHUL_BEDROCK_MODEL_ID`
+in `/srv/shuhul/.env` and run `docker compose up -d` in `/srv/shuhul`.
 
 ## Taking it down
 
@@ -118,9 +120,11 @@ aws s3 rb s3://$BUCKET --force
   its own certificate and domain.
 - The database is a container on the same disk. Deleting the stack deletes
   the accounts and projects in it.
-- The machine's address changes if it is stopped and started, and
-  CloudFront would then point at the old one. Update the stack if that
-  happens.
+- The machine's address changes if it is stopped and started, which
+  includes the automatic switch-off, and CloudFront would then point at the
+  old one. To bring it back, start the machine and update the stack.
+- The machine runs on standard CPU credits, so a long busy spell slows it
+  down instead of adding to the bill.
 - `docker-compose.yml` runs the app in production mode, where sign-in needs
   HTTPS. For work on your own computer use the development servers described
   in the main README.

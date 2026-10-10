@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Shuhul on one EC2 machine behind CloudFront. The machine runs the database,
   API, worker and website with Docker Compose. It takes the code and the
-  processed dataset from S3 when it first starts.
+  processed dataset from S3, and picks up a new code archive by itself
+  within a few minutes of it being uploaded.
 
 Parameters:
   DataBucket:
@@ -21,7 +22,13 @@ Parameters:
       in this region, so that only CloudFront can reach the machine.
   InstanceType:
     Type: String
-    Default: t3.large
+    Default: t3.medium
+  PowerOffAt:
+    Type: String
+    Default: "2026-10-17 18:30:00"
+    Description: >
+      When the machine switches itself off, in UTC, so that a forgotten
+      stack stops costing money. Only the disk is charged after that.
   ImageId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
@@ -57,6 +64,10 @@ Resources:
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub arn:aws:s3:::${DataBucket}/*
+              # The machine reports how each release went under logs/.
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:aws:s3:::${DataBucket}/logs/*
         - PolicyName: shuhul-analyse-reports
           PolicyDocument:
             Version: "2012-10-17"
@@ -94,10 +105,14 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       SecurityGroupIds:
         - !GetAtt WebSecurityGroup.GroupId
+      # Standard credits: a busy spell slows the machine instead of adding charges.
+      CreditSpecification:
+        CPUCredits: standard
+      InstanceInitiatedShutdownBehavior: stop
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-            VolumeSize: 40
+            VolumeSize: 30
             VolumeType: gp3
             Encrypted: true
       MetadataOptions:
@@ -110,7 +125,8 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          # First start: install Docker, fetch the code and the dataset from S3, start the app.
+          # First start: install Docker, then hand over to shuhul-release, which
+          # fetches the code and the dataset from S3 and starts the app.
           # The log is at /var/log/shuhul-setup.log and in the EC2 console output.
           set -euxo pipefail
           exec > >(tee /var/log/shuhul-setup.log | logger -t shuhul-setup -s 2>/dev/console) 2>&1
@@ -120,15 +136,18 @@ Resources:
           apt-get install -y docker.io docker-compose-v2
           snap install aws-cli --classic
 
+          # Spare memory for a small machine.
+          fallocate -l 2G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          echo "/swapfile none swap sw 0 0" >> /etc/fstab
+
           mkdir -p /srv/shuhul /srv/shuhul-data/processed
-          /snap/bin/aws s3 cp s3://${DataBucket}/${ReleaseKey} /tmp/shuhul.tar.gz --only-show-errors
-          tar -xzf /tmp/shuhul.tar.gz -C /srv/shuhul
 
-          /snap/bin/aws s3 sync s3://${DataBucket}/processed /srv/shuhul-data/processed --only-show-errors
-
-          cd /srv/shuhul
+          (
           umask 077
-          cat > .env <<EOF
+          cat > /srv/shuhul/.env <<EOF
           SHUHUL_SECRET_KEY=$(openssl rand -hex 32)
           POSTGRES_PASSWORD=$(openssl rand -hex 16)
           SHUHUL_DATA_DIR=/srv/shuhul-data/processed
@@ -138,8 +157,87 @@ Resources:
           AWS_DEFAULT_REGION=${AWS::Region}
           SHUHUL_BEDROCK_MODEL_ID=${BedrockModelId}
           EOF
+          )
 
+          cat > /usr/local/bin/shuhul-release <<'EOS'
+          #!/bin/bash
+          # Puts the newest code archive and dataset from S3 into service.
+          # Does nothing when the archive has not changed. With "status" it
+          # only reports. Either way the state of the app is written to
+          # logs/status.txt in the bucket.
+          set -uo pipefail
+          AWS=/snap/bin/aws
+          BUCKET=${DataBucket}
+          KEY=${ReleaseKey}
+          MARK=/srv/shuhul-release.etag
+
+          report() {
+            {
+              date -u
+              echo "release: $(cat $MARK 2>/dev/null)"
+              cd /srv/shuhul && docker compose ps
+              docker compose logs --tail 25 api worker web
+              echo "---- release log"
+              tail -60 /var/log/shuhul-release.log
+            } > /tmp/shuhul-status.txt 2>&1
+            $AWS s3 cp /tmp/shuhul-status.txt s3://$BUCKET/logs/status.txt --only-show-errors
+          }
+
+          if [ "$#" -gt 0 ] && [ "$1" = "status" ]; then
+            report
+            exit 0
+          fi
+
+          NEW=$($AWS s3api head-object --bucket $BUCKET --key $KEY --query ETag --output text) || exit 1
+          if [ "$NEW" = "$(cat $MARK 2>/dev/null)" ]; then
+            exit 0
+          fi
+
+          # Each archive is tried once, so a broken one is not rebuilt in a loop.
+          echo "$(date -u) release $NEW"
+          echo "$NEW" > $MARK
+          trap report EXIT
+          set -e
+
+          $AWS s3 cp s3://$BUCKET/$KEY /tmp/shuhul.tar.gz --only-show-errors
+          find /srv/shuhul -mindepth 1 -maxdepth 1 ! -name .env -exec rm -rf {} +
+          tar -xzf /tmp/shuhul.tar.gz -C /srv/shuhul
+          $AWS s3 sync s3://$BUCKET/processed /srv/shuhul-data/processed --only-show-errors
+
+          cd /srv/shuhul
           docker compose up -d --build
+          docker image prune -f
+          echo "$(date -u) release in service"
+          EOS
+          chmod 755 /usr/local/bin/shuhul-release
+
+          cat > /etc/cron.d/shuhul <<'EOS'
+          */3 * * * * root flock -n /run/shuhul-release.lock /usr/local/bin/shuhul-release >> /var/log/shuhul-release.log 2>&1
+          7,22,37,52 * * * * root flock -n /run/shuhul-release.lock /usr/local/bin/shuhul-release status >> /var/log/shuhul-release.log 2>&1
+          EOS
+          chmod 644 /etc/cron.d/shuhul
+
+          # Switch off at the agreed time so a forgotten stack stops costing money.
+          cat > /etc/systemd/system/shuhul-poweroff.service <<'EOS'
+          [Unit]
+          Description=Switch the Shuhul machine off at the agreed time
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/sbin/shutdown -h now
+          EOS
+          cat > /etc/systemd/system/shuhul-poweroff.timer <<'EOS'
+          [Unit]
+          Description=Switch the Shuhul machine off at the agreed time
+          [Timer]
+          OnCalendar=${PowerOffAt} UTC
+          [Install]
+          WantedBy=timers.target
+          EOS
+          systemctl daemon-reload
+          systemctl enable --now shuhul-poweroff.timer
+
+          flock -n /run/shuhul-release.lock /usr/local/bin/shuhul-release >> /var/log/shuhul-release.log 2>&1 || true
+          cat /var/log/shuhul-release.log
           echo "Shuhul setup finished"
 
   # ---------- HTTPS and caching in front of it ----------
@@ -197,3 +295,6 @@ Outputs:
   SetupLog:
     Description: Command that shows how the first start went.
     Value: !Sub aws ec2 get-console-output --instance-id ${Instance} --latest --output text --region ${AWS::Region}
+  Status:
+    Description: Command that shows the state of the app and the last release.
+    Value: !Sub aws s3 cp s3://${DataBucket}/logs/status.txt -
