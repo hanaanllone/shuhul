@@ -29,10 +29,8 @@ for district in "${DISTRICTS[@]}"; do
   aws s3 sync "processed/$district" "s3://$BUCKET/processed/$district" --only-show-errors
 done
 
-ARCHIVE="$(mktemp -d)/shuhul.tar.gz"
-git archive --format=tar.gz -o "$ARCHIVE" HEAD
+# Unix line endings whatever the computer this runs on, since the server is Linux.
 echo "Code: $(git log -1 --format='%h %s')"
-aws s3 cp "$ARCHIVE" "s3://$BUCKET/release/shuhul.tar.gz" --only-show-errors
-rm -f "$ARCHIVE"
+git -c core.autocrlf=false -c core.eol=lf archive --format=tar.gz HEAD   | aws s3 cp - "s3://$BUCKET/release/shuhul.tar.gz" --only-show-errors
 
 echo "Done. s3://$BUCKET now holds the dataset and release/shuhul.tar.gz"
