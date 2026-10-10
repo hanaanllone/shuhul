@@ -37,7 +37,7 @@ export default function DistrictSelect({ districts, value, onChange }: Props) {
       }
       hint={
         chosen && !chosen.has_tiles
-          ? "This district has the original layers only. Heat, flood and tree canopy are built for Srinagar so far."
+          ? "No heat, flood or tree canopy data for this district."
           : undefined
       }
     />

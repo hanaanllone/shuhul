@@ -94,7 +94,7 @@ def _covering_district(bounds, district=None):
             if box(*src.bounds).contains(box(*bounds)):
                 return folder.name
 
-    raise ThermalUnavailable("No thermal model covers this location.")
+    raise ThermalUnavailable("No temperature data for this location.")
 
 
 def model_summary(district):

@@ -285,7 +285,7 @@ def _land_shares(folder, area):
     roofs, _ = _values(folder / "buildings.tif", area)
 
     if landcover is None or not landcover.size or trees is None or roofs is None:
-        raise AreaError("This district does not have the land cover needed for a what-if.")
+        raise AreaError("No land cover data for this district.")
 
     water = float(np.isin(landcover, WATER_CODES).mean())
     built = float((landcover == BUILT_CODE).mean())
@@ -358,7 +358,7 @@ def what_if(district, geometry, change, share):
 
     inside = picked("footprint")
     if inside is None:
-        raise AreaError("The thermal model does not cover this area.")
+        raise AreaError("No temperature data for this area.")
 
     return {
         "change": change,
@@ -469,7 +469,7 @@ def around(lat, lng, radius_m=AROUND_RADIUS_M):
     lat, lng = float(lat), float(lng)
     district = _district_at(lat, lng)
     if district is None:
-        raise AreaError("This place is outside the districts Shuhul has data for.")
+        raise AreaError("No data for this place.")
 
     with rasterio.open(Path(PROCESSED_ROOT) / district / "ndvi.tif") as src:
         crs = src.crs
@@ -483,8 +483,7 @@ def around(lat, lng, radius_m=AROUND_RADIUS_M):
     summary["scope"] = f"within {radius_m:.0f} m"
     summary["radius_m"] = radius_m
     summary["reading"] = _reading(summary) or [
-        "Only the base layers exist for this district so far, so there is no "
-        "year-by-year record to set beside the report."
+        "No year-by-year data for this district."
     ]
     summary["caution"] = (
         "This is what the satellite record shows around the place named in the "

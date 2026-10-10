@@ -253,7 +253,7 @@ export default function EcologicalStress() {
 
           {data && view === "greening" && !greening?.available && (
             <p className="message" style={{ marginTop: 14 }}>
-              Greening priority is not available here. {greening?.unavailable_reason}
+              {greening?.unavailable_reason || "No data for this district."}
             </p>
           )}
 
