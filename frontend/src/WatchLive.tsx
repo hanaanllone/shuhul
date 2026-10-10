@@ -141,27 +141,16 @@ export default function WatchLive({ onNavigate }: Props) {
   return (
     <section className="wl">
       <style>{`
-        .wl{margin:22px 22px 0;border:1px solid #8aa4a5;background:#fffdf8}
-        .wl-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;border-bottom:1px solid #8aa4a5;background:#e7eee1}
-        .wl-head h2{margin:0;color:#17275f;font-size:17px}
-        .wl-head p{margin:5px 0 0;color:#666;font-size:11px}
-        .wl-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid #ddd}
-        .wl-filters input,.wl-filters select{padding:7px 8px;border:1px solid #8aa4a5;background:#f7f6f1;font-size:12px}
-        .wl-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid #c4d2c1;background:#f7f6f1;color:#17275f;font-size:11px;cursor:pointer}
-        .wl-chip.on{border-color:#17275f;background:#17275f;color:#fff}
-        .wl-dot{width:10px;height:10px;border-radius:50%;flex:none}
-        .wl-body{display:grid;grid-template-columns:minmax(360px,1.3fr) minmax(300px,1fr)}
-        .wl-map{height:440px}
-        .wl-list{height:440px;overflow:auto;border-left:1px solid #ddd}
-        .wl-item{padding:12px 16px;border-bottom:1px solid #ddd}
-        .wl-item a{color:#17275f;font-weight:bold;font-size:13px;text-decoration:none}
-        .wl-item a:hover{text-decoration:underline}
-        .wl-item p{margin:6px 0;color:#444;font-size:12px;line-height:1.5}
-        .wl-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;color:#777;font-size:10px}
-        .wl-link{border:0;background:none;padding:0;color:#008b8b;font-size:11px;font-weight:bold;cursor:pointer}
-        .wl-note{padding:9px 18px;border-top:1px solid #ddd;color:#666;font-size:11px}
-        .wl-empty{padding:28px 18px;color:#666;font-size:12px}
-        @media (max-width: 980px){.wl-body{grid-template-columns:1fr}.wl-list{border-left:0;border-top:1px solid #ddd}}
+        .wl{margin:22px 22px 0}
+        .wl-head,.wl-filters,.wl-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+        .wl-head{justify-content:space-between}
+        .wl-dot{width:10px;height:10px;border-radius:50%;flex:none;display:inline-block}
+        .wl-body{display:grid;grid-template-columns:minmax(360px,1.3fr) minmax(300px,1fr);gap:12px}
+        .wl-map,.wl-list{height:440px}
+        .wl-list{overflow:auto}
+        .wl-item{padding:8px 0}
+        .wl-chip.on{font-weight:bold;text-decoration:underline}
+        @media (max-width: 980px){.wl-body{grid-template-columns:1fr}}
       `}</style>
 
       <div className="wl-head">
