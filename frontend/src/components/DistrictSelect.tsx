@@ -36,9 +36,11 @@ export default function DistrictSelect({ districts, value, onChange }: Props) {
           : [{ value, label: "Loading..." }]
       }
       hint={
-        chosen && !chosen.has_tiles
-          ? "No heat, flood or tree canopy data for this district."
-          : undefined
+        !chosen || chosen.has_heat
+          ? undefined
+          : chosen.has_tiles
+            ? "No surface temperature data for this district."
+            : "No heat, flood or tree canopy data for this district."
       }
     />
   );
