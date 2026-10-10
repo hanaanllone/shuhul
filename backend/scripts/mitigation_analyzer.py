@@ -86,6 +86,9 @@ NDWI_WATER_THRESHOLD = 0.20
 
 # Mitigation feasibility buffers.
 BUILDING_EXCLUSION_BUFFER_M = 5.0
+
+# ESA WorldCover class for built-up land.
+LANDCOVER_BUILT_UP = 50
 HERITAGE_EXCLUSION_BUFFER_M = 20.0
 
 # Minimum connected open-land patch.
@@ -102,13 +105,18 @@ BUSH_BUFFER_M = 2.0
 AVERAGE_ROOF_AREA_M2 = 92.903  # 1,000 ft²
 
 # We want a small shortlist rather than hundreds of raw candidates.
-MAX_ZONES = 3
+MAX_ZONES = 12
 
 # At least this many candidate zones are desirable before expanding.
 MIN_ZONES = 3
 
 # A small total capacity threshold prevents selecting three tiny patches.
 MIN_TOTAL_CAPACITY_M2 = 5000.0
+
+# Mitigation land to look for, per unit of tree canopy a route removes.
+# Twice the canopy is what the route is asked to replace; the rest is
+# headroom, because repaying the heat it adds can take more than that.
+CANOPY_CAPACITY_RATIO = 4.0
 
 # Road class -> approximate planning width if an explicit width field
 # is not available. These are only fallbacks.
@@ -979,20 +987,24 @@ def merge_candidates(open_candidates, road_candidates, roof_candidates):
     return unique
 
 
-def select_local_zones(candidates):
+def select_local_zones(candidates, required_m2=MIN_TOTAL_CAPACITY_M2):
     """
     Select the nearest practical zones.
 
     We intentionally do NOT optimize for a single global score.
     Distance is primary because this engine is local-first.
+
+    Zones are taken nearest first until together they can hold what the
+    route needs, with at least MIN_ZONES so the planner has a choice.
     """
     selected = []
     total_capacity = 0.0
 
-    # First pass: nearest zones, with a preference for having
-    # different intervention types represented when possible.
     for candidate in candidates:
         if len(selected) >= MAX_ZONES:
+            break
+
+        if len(selected) >= MIN_ZONES and total_capacity >= required_m2:
             break
 
         selected.append(candidate)
@@ -1186,6 +1198,23 @@ def process_route(
         buffer_m=BUILDING_EXCLUSION_BUFFER_M,
     )
 
+    # The named footprints cover only a fraction of real buildings.
+    # Where the fuller layers exist, ground under a detected roof or
+    # mapped as built-up is not open land either.
+    roof_share = read_same_window(
+        first_existing(district_dir, ["buildings.tif"])
+    )
+    if roof_share is not None:
+        building_mask = building_mask | (
+            np.isfinite(roof_share) & (roof_share > 0)
+        )
+
+    landcover = read_same_window(
+        first_existing(district_dir, ["landcover.tif"])
+    )
+    if landcover is not None:
+        building_mask = building_mask | (landcover == LANDCOVER_BUILT_UP)
+
     heritage_mask = vector_mask(
         heritage,
         search_area,
@@ -1284,12 +1313,6 @@ def process_route(
         roof_candidates,
     )
 
-    selected, total_capacity = select_local_zones(candidates)
-
-    # Assign Zone A / B / C.
-    for index, zone in enumerate(selected):
-        zone["zone_id"] = f"Zone {chr(65 + index)}"
-
     # --------------------------------------------------------
     # Impact references
     # --------------------------------------------------------
@@ -1301,6 +1324,20 @@ def process_route(
     canopy_area = safe_float(
         impact.get("canopy", {}).get("canopy_area_m2")
     )
+
+    required_capacity = max(
+        MIN_TOTAL_CAPACITY_M2,
+        CANOPY_CAPACITY_RATIO * (canopy_area or 0.0),
+    )
+
+    selected, total_capacity = select_local_zones(
+        candidates,
+        required_capacity,
+    )
+
+    # Assign Zone A / B / C.
+    for index, zone in enumerate(selected):
+        zone["zone_id"] = f"Zone {chr(65 + index)}"
 
     return {
         "route": route_name,
@@ -1330,6 +1367,7 @@ def process_route(
             ),
             "selected_zone_count": len(selected),
             "selected_capacity_m2": total_capacity,
+            "required_capacity_m2": required_capacity,
         },
         "selected_zones": selected,
     }
@@ -1388,9 +1426,14 @@ def find_mitigation_for_route(
 
         if (
             zones >= MIN_ZONES
-            and capacity >= MIN_TOTAL_CAPACITY_M2
+            and capacity >= result["candidate_summary"]["required_capacity_m2"]
         ):
             result["search_status"] = "sufficient_local_opportunities_found"
+            return result
+
+        # Looking farther only helps while there is room for more zones.
+        if zones >= MAX_ZONES:
+            result["search_status"] = "nearest_zones_selected"
             return result
 
     last_result["search_status"] = "expanded_to_maximum_radius"

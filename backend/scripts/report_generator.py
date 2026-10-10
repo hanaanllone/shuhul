@@ -50,6 +50,9 @@ def build_report(project_payload, district, impact_result, mitigation_result):
             "tree_equivalent": impact.get("canopy", {}).get("estimated_tree_equivalent"),
             "heat_added_degree_ha": impact.get("heat", {}).get("heat_added_degree_ha"),
             "heat_repaid_pct": impact.get("heat", {}).get("heat_repaid_pct"),
+            "mitigation_owed_m2": impact.get("mitigation_plan", {}).get("canopy_owed_m2"),
+            "mitigation_allocated_m2": impact.get("mitigation_plan", {}).get("allocated_m2"),
+            "mitigation_status": impact.get("mitigation_plan", {}).get("status"),
             "corridor_change_c": impact.get("heat", {}).get("corridor_change_c"),
             "flood_prone_m2": impact.get("flood", {}).get("flood_prone_m2"),
             "lost_water_m2": impact.get("flood", {}).get("lost_water_m2"),
@@ -134,6 +137,7 @@ def render_report_html(report):
             f"<td>{_fmt(r.get('tree_equivalent'), 0)}</td>"
             f"<td>{_fmt(r.get('corridor_change_c'), 2)}</td>"
             f"<td>{_fmt(r.get('heat_added_degree_ha'), 1)}</td>"
+            f"<td>{_fmt(r.get('mitigation_allocated_m2'), 0)}</td>"
             f"<td>{_fmt(r.get('heat_repaid_pct'), 0)}</td>"
             f"<td>{_fmt(r.get('flood_prone_m2'), 0)}</td>"
             f"<td>{_fmt(r.get('lost_water_m2'), 0)}</td>"
@@ -215,7 +219,7 @@ Total selected mitigation opportunity: {_fmt(report.get('summary', {}).get('miti
 <table>
 <thead><tr>
 <th>Route</th><th>Tree-equivalent canopy</th><th>Corridor temperature change °C</th>
-<th>Heat added, degree-hectares</th><th>Repaid near the route %</th>
+<th>Heat added, degree-hectares</th><th>Mitigation sized m²</th><th>Repaid near the route %</th>
 <th>Flood-prone land m²</th><th>Former water m²</th>
 </tr></thead>
 <tbody>{''.join(heat_rows)}</tbody>

@@ -6,7 +6,7 @@ temperature, using the district model fitted by
 backend/scripts/build_thermal_model.py.
 
 A scenario is a list of changes. Each change is a shape and the surface
-it becomes:
+it becomes, optionally followed by the share of the shape that changes:
 
     road        new paved road
     built       buildings
@@ -165,11 +165,14 @@ def _apply(features, summary, changes, transform):
     changed = {name: array.copy() for name, array in features.items()}
     typical = summary["typical_surfaces"]
 
-    for geometry, surface in changes:
+    for change in changes:
+        geometry, surface = change[0], change[1]
+        intensity = change[2] if len(change) > 2 else 1.0
+
         if surface not in typical:
             raise ValueError(f"Unknown surface type: {surface}")
 
-        share = _coverage(geometry, shape, transform)
+        share = _coverage(geometry, shape, transform) * intensity
         names = GREEN_ROOF_FEATURES if surface == "green_roof" else SURFACE_FEATURES
 
         for name in names:
@@ -217,15 +220,15 @@ def run_scenarios(scenarios, district=None, focus=None):
     """
     Estimate the thermal effect of one or more scenarios over the same area.
 
-    scenarios: {name: [(geometry, surface), ...]} with geometries in the
-               district's projected CRS (EPSG:32643).
+    scenarios: {name: [(geometry, surface) or (geometry, surface, share), ...]}
+               with geometries in the district's projected CRS (EPSG:32643).
     focus:     geometry whose surroundings are reported on. Defaults to
                everything any scenario touches.
 
     Returns per-scenario statistics for the footprint and for the
     surrounding impact zone, plus the grids needed to map the change.
     """
-    geometries = [geometry for changes in scenarios.values() for geometry, _ in changes]
+    geometries = [change[0] for changes in scenarios.values() for change in changes]
     if not geometries:
         raise ValueError("A scenario needs at least one change.")
 

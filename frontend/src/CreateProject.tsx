@@ -141,6 +141,8 @@ function getReportRouteRows(result) {
     treeEquivalent: data?.canopy?.estimated_tree_equivalent,
     heatAdded: data?.heat?.heat_added_degree_ha,
     heatRepaid: data?.heat?.heat_repaid_pct,
+    mitigationAllocated: data?.mitigation_plan?.allocated_m2,
+    mitigationAvailable: data?.mitigation_plan?.available_nearby_m2,
     tempChange: data?.heat?.corridor_change_c,
     heatError: data?.heat?.method?.held_out_error_c,
     floodProne: data?.flood?.flood_prone_m2,
@@ -2556,7 +2558,8 @@ return (
                           <span><b>{formatReportNumber(row.slope, 2)}°</b> mean slope</span>
                           <span><b>{formatReportNumber(row.tempChange, 2)} °C</b> modelled corridor warming</span>
                           <span><b>{formatReportNumber(row.heatAdded, 1)}</b> degree-hectares of heat added</span>
-                          <span><b>{formatReportNumber(row.heatRepaid, 0)}%</b> repaid by mitigation nearby</span>
+                          <span><b>{formatReportNumber(row.mitigationAllocated, 0)} m²</b> of mitigation needed, of {formatReportNumber(row.mitigationAvailable, 0)} m² found nearby</span>
+                          <span><b>{formatReportNumber(row.heatRepaid, 0)}%</b> of added heat repaid nearby</span>
                           <span><b>{formatReportNumber(row.floodProne, 0)} m²</b> flood-prone land</span>
                           <span><b>{formatReportNumber(row.lostWater, 0)} m²</b> former water</span>
                         </div>

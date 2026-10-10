@@ -1,16 +1,18 @@
 """
-Shuhul route effects: heat and flood.
+Shuhul route effects: heat, flood and how much mitigation a route owes.
 
-Adds two entries to every route in the impact result:
+Adds three entries to every route in the impact result:
 
-    heat    existing / after construction / after mitigation, from the
-            district thermal model, and how much of the added heat the
-            proposed mitigation repays near the route
-    flood   how much of the construction corridor lies on flood-prone
-            land or on land that used to be water
+    heat             existing / after construction / after mitigation,
+                     from the district thermal model
+    flood            how much of the construction corridor lies on
+                     flood-prone land or on land that used to be water
+    mitigation_plan  how much of the nearby mitigation land the route
+                     needs, zone by zone, and whether that repays the
+                     heat it adds
 
-Both are measured on the construction corridor (the route buffered by
-half the project width), the same corridor the impact analysis uses.
+All three are measured on the construction corridor (the route buffered
+by half the project width), the same corridor the impact analysis uses.
 """
 
 from pathlib import Path
@@ -38,6 +40,17 @@ MITIGATION_SURFACES = {
     "green_roof": "green_roof",
 }
 
+# Area of green infrastructure asked for per unit of tree canopy removed.
+# Two for one is the starting point; it is a planning assumption.
+CANOPY_COMPENSATION_RATIO = 2.0
+
+# If that does not repay the heat a route adds, the plan grows in steps
+# until it does or the nearby land runs out.
+SIZING_ROUNDS = 6
+SIZING_STEP = 1.6
+SIZING_FIRST_STEP_M2 = 1000.0
+HEAT_REPAID_TOLERANCE_DEGREE_HA = 0.05
+
 
 def _corridors(route_file, width_m, crs):
     """Construction corridor of every route, in the district CRS."""
@@ -53,32 +66,65 @@ def _corridors(route_file, width_m, crs):
     }
 
 
-def _mitigation_changes(mitigation_result, route_name, crs):
-    """Proposed green infrastructure for a route as (shape, surface) pairs."""
+def _mitigation_zones(mitigation_result, route_name, crs):
+    """Mitigation zones found for a route, nearest first."""
     features = (mitigation_result or {}).get("geojson", {}).get("features", [])
-    shapes = []
-    surfaces = []
+    picked = []
 
     for feature in features:
         properties = feature.get("properties", {})
-        if properties.get("route") != route_name or not feature.get("geometry"):
-            continue
-
         surface = MITIGATION_SURFACES.get(properties.get("intervention"))
-        if surface is None:
+
+        if properties.get("route") != route_name or surface is None or not feature.get("geometry"):
             continue
 
-        shapes.append(shape(feature["geometry"]))
-        surfaces.append(surface)
+        picked.append((properties, surface, shape(feature["geometry"])))
 
-    if not shapes:
+    if not picked:
         return []
 
-    projected = gpd.GeoSeries(shapes, crs="EPSG:4326").to_crs(crs)
+    projected = gpd.GeoSeries([item[2] for item in picked], crs="EPSG:4326").to_crs(crs)
+    zones = []
+
+    for (properties, surface, _), geometry in zip(picked, projected):
+        if geometry.geom_type not in ("Polygon", "MultiPolygon") or geometry.is_empty:
+            continue
+
+        zones.append({
+            "zone_id": properties.get("zone_id"),
+            "intervention": properties.get("intervention"),
+            "surface": surface,
+            "geometry": geometry,
+            "distance_m": float(properties.get("distance_m") or 0.0),
+            "available_m2": float(properties.get("capacity_m2") or geometry.area),
+            "allocated_m2": 0.0,
+        })
+
+    return sorted(zones, key=lambda zone: zone["distance_m"])
+
+
+def _allocate(zones, target_m2):
+    """Fill zones nearest first until the target area is reached."""
+    remaining = target_m2
+
+    for zone in zones:
+        zone["allocated_m2"] = max(min(zone["available_m2"], remaining), 0.0)
+        remaining -= zone["allocated_m2"]
+
+
+def _changes(zones):
+    """
+    Allocated mitigation as thermal changes. A zone that is only partly
+    used is treated as planted evenly at that share.
+    """
     return [
-        (geometry, surface)
-        for geometry, surface in zip(projected, surfaces)
-        if geometry.geom_type in ("Polygon", "MultiPolygon") and not geometry.is_empty
+        (
+            zone["geometry"],
+            zone["surface"],
+            min(zone["allocated_m2"] / zone["geometry"].area, 1.0),
+        )
+        for zone in zones
+        if zone["allocated_m2"] > 0 and zone["geometry"].area > 0
     ]
 
 
@@ -179,10 +225,78 @@ def heat_effect(district, corridor, mitigation, construction):
     return summary
 
 
+def plan_mitigation(district, corridor, zones, canopy_removed_m2, construction):
+    """
+    Size the mitigation to what the route owes.
+
+    It starts at twice the tree canopy the route removes, placed in the
+    nearest zones first. If the thermal model says that still leaves
+    the surroundings warmer, the plan grows until the added heat is
+    repaid or the zones found near the route are used up.
+
+    Returns (heat, plan).
+    """
+    available = sum(zone["available_m2"] for zone in zones)
+    owed = CANOPY_COMPENSATION_RATIO * canopy_removed_m2
+    target = min(owed, available)
+    status = "no_zones" if not zones else "sized_to_canopy"
+
+    heat = heat_effect(district, corridor, None, construction)
+
+    for _ in range(SIZING_ROUNDS):
+        if not zones or not heat.get("available"):
+            break
+
+        _allocate(zones, target)
+        heat = heat_effect(district, corridor, _changes(zones) or None, construction)
+
+        remaining = heat.get("heat_remaining_degree_ha", heat["heat_added_degree_ha"])
+        if remaining <= HEAT_REPAID_TOLERANCE_DEGREE_HA:
+            status = "heat_repaid" if target > owed else "sized_to_canopy"
+            break
+
+        if target >= available:
+            status = "nearby_land_used_up"
+            break
+
+        target = min(max(target * SIZING_STEP, target + SIZING_FIRST_STEP_M2), available)
+        status = "grown_for_heat"
+
+    allocated = sum(zone["allocated_m2"] for zone in zones)
+
+    plan = {
+        "status": status,
+        "canopy_removed_m2": round(canopy_removed_m2, 1),
+        "canopy_ratio": CANOPY_COMPENSATION_RATIO,
+        "canopy_owed_m2": round(owed, 1),
+        "allocated_m2": round(allocated, 1),
+        "available_nearby_m2": round(available, 1),
+        "heat_repaid_pct": heat.get("heat_repaid_pct"),
+        "zones": [
+            {
+                "zone_id": zone["zone_id"],
+                "intervention": zone["intervention"],
+                "distance_m": round(zone["distance_m"], 1),
+                "available_m2": round(zone["available_m2"], 1),
+                "allocated_m2": round(zone["allocated_m2"], 1),
+            }
+            for zone in zones
+        ],
+        "note": (
+            f"Starts at {CANOPY_COMPENSATION_RATIO:g} m² of green infrastructure per m² of "
+            "tree canopy removed, a planning assumption, then grows until the modelled "
+            "heat added near the route is repaid or the nearby zones are used up. "
+            "Planting is credited at maturity."
+        ),
+    }
+
+    return heat, plan
+
+
 def add_route_effects(district, payload, impact_result, mitigation_result, output_dir):
     """
-    Add heat and flood entries to each route of the impact result, in
-    place, and save them next to the other project files.
+    Add heat, flood and mitigation-plan entries to each route of the
+    impact result, in place, and save them next to the other project files.
     """
     construction = payload["constructionType"]
     route_file = Path(output_dir) / f"routes_{construction}.geojson"
@@ -198,11 +312,19 @@ def add_route_effects(district, payload, impact_result, mitigation_result, outpu
         if corridor is None:
             continue
 
-        mitigation = _mitigation_changes(mitigation_result, route_name, crs)
+        zones = _mitigation_zones(mitigation_result, route_name, crs)
+        canopy_removed = float(route.get("canopy", {}).get("canopy_area_m2") or 0.0)
 
-        route["heat"] = heat_effect(district, corridor, mitigation, construction)
+        route["heat"], route["mitigation_plan"] = plan_mitigation(
+            district, corridor, zones, canopy_removed, construction
+        )
         route["flood"] = flood_exposure(district, corridor)
-        effects[route_name] = {"heat": route["heat"], "flood": route["flood"]}
+
+        effects[route_name] = {
+            "heat": route["heat"],
+            "flood": route["flood"],
+            "mitigation_plan": route["mitigation_plan"],
+        }
 
     path = Path(output_dir) / f"effects_{construction}.json"
     path.write_text(json.dumps(effects, indent=2), encoding="utf-8")
