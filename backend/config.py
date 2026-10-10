@@ -19,7 +19,7 @@ DATABASE_URL = os.getenv("SHUHUL_DATABASE_URL") or f"sqlite:///{DATABASE_PATH.as
 # Comma-separated list of origins allowed to call the API with cookies.
 FRONTEND_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").split(",")
+    for origin in os.getenv("FRONTEND_ORIGIN", "http://localhost:5173,http://localhost:5174").split(",")
     if origin.strip()
 ]
 DEFAULT_DISTRICT = os.getenv("SHUHUL_DEFAULT_DISTRICT", "sxr")
