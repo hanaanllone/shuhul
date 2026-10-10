@@ -348,9 +348,26 @@ export default function CreateProject({
 
   loadSavedProject();
 }, [projectId]);
+  // A location handed over from Environmental Watch. It is cleared after
+  // the first render so a later visit starts from the usual view.
+  const [watchFocus] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("shuhulFocus") || "null");
+      return saved && saved.lat != null && saved.lng != null ? saved : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    sessionStorage.removeItem("shuhulFocus");
+  }, []);
+
   // Raster layers come from the layer manifest, so a new layer on the
   // server shows up here without a code change.
-  const [rasterOn, setRasterOn] = useState({});
+  const [rasterOn, setRasterOn] = useState(() =>
+    Object.fromEntries((watchFocus?.layers || []).map((name) => [name, true]))
+  );
 
   const toggleRaster = (name) => {
     setRasterOn((previous) => ({
@@ -1701,8 +1718,8 @@ return (
                   </button>
                     
                   <MapContainer
-                    center={srinagarCenter}
-                    zoom={12}
+                    center={watchFocus ? [watchFocus.lat, watchFocus.lng] : srinagarCenter}
+                    zoom={watchFocus ? 14 : 12}
                     zoomControl={false}
                     className="map-container"
                   >
@@ -1772,6 +1789,29 @@ return (
                         />
                       </BaseLayer>
                     </LayersControl>
+
+                    {watchFocus && (
+                      <CircleMarker
+                        center={[watchFocus.lat, watchFocus.lng]}
+                        radius={11}
+                        pathOptions={{
+                          color: "#17275f",
+                          weight: 3,
+                          fillColor: "#ffffff",
+                          fillOpacity: 0.85,
+                        }}
+                      >
+                        <Popup>
+                          <b>{watchFocus.label}</b>
+                          <br />
+                          {watchFocus.title}
+                          <br />
+                          <span style={{ color: "#666" }}>
+                            Reported location from Environmental Watch. Not verified.
+                          </span>
+                        </Popup>
+                      </CircleMarker>
+                    )}
 
                     {rasterLayers.map(([name, layer]) => {
                       if (!rasterOn[name]) return null;

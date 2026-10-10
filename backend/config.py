@@ -34,6 +34,12 @@ INLINE_WORKER = os.getenv("SHUHUL_INLINE_WORKER", "0" if IS_PRODUCTION else "1")
 
 MAX_ACTIVE_PROJECTS_PER_USER = int(os.getenv("SHUHUL_MAX_ACTIVE_PROJECTS", "2"))
 
+# How often the worker re-reads the news outlets for Environmental Watch.
+# Off in development so restarting the app does not keep fetching them.
+WATCH_REFRESH_HOURS = float(
+    os.getenv("SHUHUL_WATCH_REFRESH_HOURS", "3" if IS_PRODUCTION else "0")
+)
+
 _PLACEHOLDER_SECRETS = {
     "",
     "dev-only-change-this",
