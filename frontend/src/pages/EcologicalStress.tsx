@@ -26,6 +26,9 @@ interface Zone {
   greening_rank: number | null;
   greening_factors: Record<string, number>;
   greening_reasons: string[];
+  education_buildings: number;
+  health_buildings: number;
+  sensitive_names: string[];
 }
 
 interface StressData extends GeoJSON.FeatureCollection {
@@ -40,6 +43,7 @@ interface StressData extends GeoJSON.FeatureCollection {
     levels: string;
     left_out: string;
     air_note: string;
+    sensitive_note: string;
     confidence: string;
   };
 }
@@ -69,6 +73,23 @@ const INDICATORS: Record<string, string> = {
 
 const TOP_ZONES = 8;
 
+function hasSensitiveSite(zone: Zone): boolean {
+  return zone.education_buildings + zone.health_buildings > 0;
+}
+
+// "2 school or college buildings, 1 hospital or clinic building: Name, Name"
+function sitesText(zone: Zone): string {
+  const parts: string[] = [];
+  if (zone.education_buildings) {
+    parts.push(`${zone.education_buildings} school or college building${zone.education_buildings === 1 ? "" : "s"}`);
+  }
+  if (zone.health_buildings) {
+    parts.push(`${zone.health_buildings} hospital or clinic building${zone.health_buildings === 1 ? "" : "s"}`);
+  }
+  const names = zone.sensitive_names.length ? `: ${zone.sensitive_names.join(", ")}` : "";
+  return parts.join(", ") + names;
+}
+
 // ["Little tree canopy", "Hot surface"] -> "Little tree canopy, hot surface"
 function asSentence(reasons: string[]): string {
   const text = reasons.join(", ").toLowerCase();
@@ -84,6 +105,7 @@ export default function EcologicalStress() {
   const [error, setError] = useState("");
   const [level, setLevel] = useState<Level | null>(null);
   const [picked, setPicked] = useState<Zone | null>(null);
+  const [sitesOnly, setSitesOnly] = useState(false);
 
   useEffect(() => {
     setData(null);
@@ -108,10 +130,14 @@ export default function EcologicalStress() {
     if (!data) return null;
     return {
       type: "FeatureCollection",
-      features: data.features.filter((feature) => !level || levelOf(feature.properties as Zone) === level),
+      features: data.features.filter((feature) => {
+        const zone = feature.properties as Zone;
+        if (level && levelOf(zone) !== level) return false;
+        return !(view === "greening" && sitesOnly) || hasSensitiveSite(zone);
+      }),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, level, view]);
+  }, [data, level, view, sitesOnly]);
 
   const bounds = useMemo<LatLngBoundsExpression | null>(
     () => (data && data.features.length ? leafletGeoJSON(data).getBounds() : null),
@@ -141,9 +167,14 @@ export default function EcologicalStress() {
   const topZones = useMemo(
     () =>
       zones
-        .filter((zone) => zone.greening_rank !== null)
+        .filter((zone) => zone.greening_rank !== null && (!sitesOnly || hasSensitiveSite(zone)))
         .sort((a, b) => (a.greening_rank as number) - (b.greening_rank as number))
         .slice(0, TOP_ZONES),
+    [zones, sitesOnly]
+  );
+
+  const zonesWithSites = useMemo(
+    () => zones.filter((zone) => zone.greening_rank !== null && hasSensitiveSite(zone)).length,
     [zones]
   );
 
@@ -166,7 +197,7 @@ export default function EcologicalStress() {
             <FitBounds bounds={bounds} />
             {shown && (
               <GeoJSON
-                key={`${district}-${view}-${level}-${picked?.zone_id}`}
+                key={`${district}-${view}-${level}-${sitesOnly}-${picked?.zone_id}`}
                 data={shown}
                 style={(feature) => {
                   const zone = feature?.properties as Zone;
@@ -243,6 +274,19 @@ export default function EcologicalStress() {
                 ))}
               </div>
               <p className="field-hint">Each zone is a 500 m square. Select a level to show only those zones.</p>
+
+              {view === "greening" && zonesWithSites > 0 && (
+                <div className="chip-row" style={{ marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="chip"
+                    aria-pressed={sitesOnly}
+                    onClick={() => setSitesOnly(!sitesOnly)}
+                  >
+                    With a school or hospital ({zonesWithSites})
+                  </button>
+                </div>
+              )}
             </PanelSection>
           )}
 
@@ -324,6 +368,7 @@ export default function EcologicalStress() {
                       {picked.greening_reasons.length > 0 && (
                         <p style={{ marginBottom: 12 }}>Why: {picked.greening_reasons.join(", ").toLowerCase()}.</p>
                       )}
+                      {hasSensitiveSite(picked) && <p style={{ marginBottom: 12 }}>Here: {sitesText(picked)}.</p>}
 
                       <div className="stat-grid">
                         <Stat label="Tree canopy" value={`${num(picked.canopy_cover_pct, 1)}%`} />
@@ -362,6 +407,7 @@ export default function EcologicalStress() {
                         <p className="note">
                           {asSentence(zone.greening_reasons) || "No single factor stands out"}. Canopy{" "}
                           {num(zone.canopy_cover_pct, 1)}%, surface {num(zone.mean_lst, 1)} °C.
+                          {hasSensitiveSite(zone) && ` Here: ${sitesText(zone)}.`}
                         </p>
                       </div>
                     ))}
@@ -378,6 +424,13 @@ export default function EcologicalStress() {
                   </p>
                 )}
                 <p className="note">{greening.air_note}</p>
+              </PanelSection>
+
+              <PanelSection heading="Schools and hospitals">
+                <p className="note">
+                  Heat matters more where children and patients are. {greening.sensitive_note} They do not
+                  change a zone's rank; use the filter above to see the ranked zones that have one.
+                </p>
               </PanelSection>
 
               <PanelSection heading="How zones are ranked">

@@ -76,6 +76,18 @@ MOSTLY_WATER_PCT = 50.0
 
 # Greening priority: (zone property, weight, True when a high value raises
 # priority, what it means in a planner's words).
+# Buildings where heat matters more because of who uses them, by the tag
+# they carry on the named buildings layer.
+SENSITIVE_KINDS = {
+    "school": "education",
+    "kindergarten": "education",
+    "college": "education",
+    "university": "education",
+    "hospital": "health",
+    "clinic": "health",
+}
+MAX_SITE_NAMES = 4
+
 # The highest-ranked 15% of zones are "high", the next 35% "moderate".
 GREENING_HIGH_SHARE = 0.15
 GREENING_MODERATE_SHARE = 0.50
@@ -308,6 +320,49 @@ def add_greening_priority(features):
     return len(scored)
 
 
+def sensitive_sites(path, transform, crs, step_x, step_y):
+    """
+    Schools, colleges, hospitals and clinics among the named buildings,
+    grouped by the zone each stands in: {(zone row, zone column): counts}.
+    """
+    by_zone = {}
+    if path is None:
+        return by_zone
+
+    try:
+        frame = gpd.read_file(path)
+    except Exception:
+        return by_zone
+
+    if "amenity" not in frame.columns or "building" not in frame.columns:
+        return by_zone
+    if frame.crs is None:
+        frame = frame.set_crs(crs)
+    frame = frame.to_crs(crs)
+
+    for _, row in frame.iterrows():
+        group = SENSITIVE_KINDS.get(row["amenity"]) or SENSITIVE_KINDS.get(row["building"])
+        if group is None or row.geometry is None or row.geometry.is_empty:
+            continue
+
+        centre = row.geometry.centroid
+        col, line = ~transform * (centre.x, centre.y)
+        if col < 0 or line < 0:
+            continue
+
+        entry = by_zone.setdefault(
+            (int(line) // step_y, int(col) // step_x),
+            {"education": 0, "health": 0, "names": []},
+        )
+        entry[group] += 1
+
+        name = row.get("name")
+        if isinstance(name, str) and name.strip() and name not in entry["names"]:
+            entry["names"].append(name.strip())
+
+    return by_zone
+
+
 def zone_polygon(row0, row1, col0, col1, transform, crs):
     """Return the zone polygon in WGS84 for Leaflet/GeoJSON display."""
     x0, y1 = transform * (col0, row0)
@@ -399,6 +454,8 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
     step_x = max(1, int(round(zone_size_m / pixel_x)))
     step_y = max(1, int(round(zone_size_m / pixel_y)))
 
+    sites_by_zone = sensitive_sites(buildings_path, transform, crs, step_x, step_y)
+
     features = []
     zone_number = 1
 
@@ -464,6 +521,7 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
 
             road_share = mean_in(main_roads)
             water_share = mean_in(water)
+            sites = sites_by_zone.get((row0 // step_y, col0 // step_x), {})
 
             polygon = zone_polygon(row0, row1, col0, col1, transform, crs)
 
@@ -485,6 +543,9 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
                     "mean_lst": round(mean_in(lst), 2) if lst_available else None,
                     "main_road_pct": round(road_share * 100, 2) if road_share is not None else None,
                     "water_pct": round(water_share * 100, 2) if water_share is not None else None,
+                    "education_buildings": sites.get("education", 0),
+                    "health_buildings": sites.get("health", 0),
+                    "sensitive_names": sites.get("names", [])[:MAX_SITE_NAMES],
                 },
             })
             zone_number += 1
@@ -533,6 +594,11 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
                 "Air quality here is one modelled value for the whole district, so it "
                 "cannot tell zones apart. The share of each zone taken up by main roads "
                 "stands in for exposure to traffic pollution. It is not a measurement."
+            ),
+            "sensitive_note": (
+                "Schools, colleges, hospitals and clinics are the buildings tagged as "
+                "such on OpenStreetMap. Many are not mapped, so a zone shown without "
+                "one may still have one."
             ),
             "confidence": "Low. A screening index for comparing zones inside one district.",
         },
