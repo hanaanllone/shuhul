@@ -1,7 +1,7 @@
-import { useMemo } from "react";
-import { latLngBounds } from "leaflet";
+import { useEffect, useMemo } from "react";
+import { geoJSON as leafletGeoJSON, latLngBounds } from "leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
-import { CircleMarker, GeoJSON, Polyline, Tooltip, useMapEvents } from "react-leaflet";
+import { CircleMarker, GeoJSON, Polyline, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import BaseMap, { FitBounds, ResizeWatcher } from "../../components/BaseMap";
 import { MapLegend, RasterLayers } from "../../components/MapLayers";
 import type { ActiveLayers } from "../../components/MapLayers";
@@ -16,6 +16,13 @@ export const INTERVENTIONS: Record<string, { label: string; color: string }> = {
   green_roof: { label: "Green roofs", color: "#6a5aae" },
 };
 
+// Which kinds of mitigation zone are drawn. Viewing only: the plan is unchanged.
+export type ZoneKinds = Record<string, boolean>;
+
+export const ALL_ZONE_KINDS: ZoneKinds = Object.fromEntries(
+  Object.keys(INTERVENTIONS).map((kind) => [kind, true])
+);
+
 interface Props {
   manifest: LayerManifest | null;
   activeLayers: ActiveLayers;
@@ -25,8 +32,23 @@ interface Props {
   result: ProjectResult | null;
   corridors: GeoJSON.FeatureCollection | null;
   selectedRoute: string | null;
-  show: { routes: boolean; corridors: boolean; mitigation: boolean };
+  show: { routes: boolean; corridors: boolean };
+  zoneKinds: ZoneKinds;
+  highlightZone: string | null;
+  onZoneClick: (zoneId: string) => void;
   focus?: (LatLng & { title: string; label: string }) | null;
+}
+
+// Brings the highlighted zone into view.
+function ShowZone({ zone }: { zone: GeoJSON.Feature | undefined }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!zone) return;
+    map.flyToBounds(leafletGeoJSON(zone).getBounds(), { maxZoom: 16, padding: [80, 80], duration: 0.6 });
+  }, [map, zone]);
+
+  return null;
 }
 
 function ClickToPick({ active, onPick }: { active: boolean; onPick: (point: LatLng) => void }) {
@@ -53,6 +75,9 @@ export default function PlannerMap({
   corridors,
   selectedRoute,
   show,
+  zoneKinds,
+  highlightZone,
+  onZoneClick,
   focus,
 }: Props) {
   const routes = useMemo(
@@ -68,8 +93,17 @@ export default function PlannerMap({
 
   const zones = useMemo(() => {
     const features = result?.mitigation?.geojson?.features || [];
-    return features.filter((feature) => !selectedRoute || feature.properties?.route === selectedRoute);
-  }, [result, selectedRoute]);
+    return features.filter(
+      (feature) =>
+        (!selectedRoute || feature.properties?.route === selectedRoute) &&
+        zoneKinds[feature.properties?.intervention]
+    );
+  }, [result, selectedRoute, zoneKinds]);
+
+  const highlighted = useMemo(
+    () => zones.find((feature) => feature.properties?.zone_id === highlightZone),
+    [zones, highlightZone]
+  );
 
   return (
     <div className="map-card">
@@ -94,17 +128,23 @@ export default function PlannerMap({
           />
         )}
 
-        {show.mitigation && zones.length > 0 && (
+        <ShowZone zone={highlighted} />
+
+        {zones.length > 0 && (
           <GeoJSON
-            key={`zones-${result?.projectId}-${selectedRoute}`}
+            key={`zones-${result?.projectId}-${selectedRoute}-${highlightZone}-${zones.length}`}
             data={{ type: "FeatureCollection", features: zones } as GeoJSON.FeatureCollection}
             style={(feature) => {
               const color = INTERVENTIONS[feature?.properties?.intervention]?.color || "#2f8f6b";
-              return { color, weight: 2, fillColor: color, fillOpacity: 0.35 };
+              const chosen = feature?.properties?.zone_id === highlightZone;
+              return chosen
+                ? { color: "#142a28", weight: 4, fillColor: color, fillOpacity: 0.7 }
+                : { color, weight: 2, fillColor: color, fillOpacity: highlightZone ? 0.18 : 0.35 };
             }}
             onEachFeature={(feature, layer) => {
               const kind = INTERVENTIONS[feature.properties?.intervention]?.label || "Mitigation";
               layer.bindTooltip(`${feature.properties?.zone_id}: ${kind}`);
+              layer.on("click", () => onZoneClick(String(feature.properties?.zone_id)));
             }}
           />
         )}

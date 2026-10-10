@@ -4,8 +4,8 @@ import type { ActiveLayers } from "../components/MapLayers";
 import { Panel, PanelSection, Tabs } from "../components/ui";
 import { api, errorMessage, post } from "../lib/api";
 import type { LatLng, ProjectDetail, ProjectResult, ProjectStatus } from "../lib/types";
-import PlannerMap from "./planner/PlannerMap";
-import type { PointName } from "./planner/PlannerMap";
+import PlannerMap, { ALL_ZONE_KINDS, INTERVENTIONS } from "./planner/PlannerMap";
+import type { PointName, ZoneKinds } from "./planner/PlannerMap";
 import { HeatPanel, MethodPanel, MitigationPanel, RoutesPanel } from "./planner/ResultPanels";
 import SetupPanel, { DEFAULT_FORM } from "./planner/SetupPanel";
 import type { PlannerForm } from "./planner/SetupPanel";
@@ -51,7 +51,31 @@ export default function RoutePlanner({ projectId }: Props) {
   const [activeLayers, setActiveLayers] = useState<ActiveLayers>(() =>
     Object.fromEntries((focus?.layers || []).map((name) => [name, true]))
   );
-  const [show, setShow] = useState({ routes: true, corridors: true, mitigation: true });
+  const [show, setShow] = useState({ routes: true, corridors: true });
+  const [zoneKinds, setZoneKinds] = useState<ZoneKinds>(ALL_ZONE_KINDS);
+  const [highlightZone, setHighlightZone] = useState<string | null>(null);
+
+  // A second press on the same zone lets go of it.
+  function pickZone(zoneId: string) {
+    setHighlightZone((previous) => (previous === zoneId ? null : zoneId));
+  }
+
+  const zoneChips = (
+    <div className="chip-row">
+      {Object.entries(INTERVENTIONS).map(([kind, spec]) => (
+        <button
+          key={kind}
+          type="button"
+          className="chip"
+          aria-pressed={zoneKinds[kind]}
+          onClick={() => setZoneKinds((previous) => ({ ...previous, [kind]: !previous[kind] }))}
+        >
+          <span className="dot" style={{ background: spec.color }} />
+          {spec.label}
+        </button>
+      ))}
+    </div>
+  );
 
   const manifest = useLayerManifest(result?.district || "sxr");
 
@@ -62,7 +86,13 @@ export default function RoutePlanner({ projectId }: Props) {
   function accept(finished: ProjectResult) {
     setResult(finished);
     setSelectedRoute(Object.keys(finished.impact?.routes || {})[0] || null);
+    setHighlightZone(null);
     setTab("routes");
+  }
+
+  function selectRoute(name: string | null) {
+    setSelectedRoute(name);
+    setHighlightZone(null);
   }
 
   // Open a saved project.
@@ -185,6 +215,9 @@ export default function RoutePlanner({ projectId }: Props) {
           corridors={corridors}
           selectedRoute={selectedRoute}
           show={show}
+          zoneKinds={zoneKinds}
+          highlightZone={highlightZone}
+          onZoneClick={pickZone}
           focus={focus}
         />
 
@@ -234,21 +267,28 @@ export default function RoutePlanner({ projectId }: Props) {
               />
 
               {hasResult && (
-                <PanelSection heading="This project">
-                  <div className="chip-row">
-                    {(["routes", "corridors", "mitigation"] as const).map((name) => (
-                      <button
-                        key={name}
-                        type="button"
-                        className="chip"
-                        aria-pressed={show[name]}
-                        onClick={() => setShow((previous) => ({ ...previous, [name]: !previous[name] }))}
-                      >
-                        {name === "routes" ? "Routes" : name === "corridors" ? "Corridors" : "Mitigation zones"}
-                      </button>
-                    ))}
-                  </div>
-                </PanelSection>
+                <>
+                  <PanelSection heading="This project">
+                    <div className="chip-row">
+                      {(["routes", "corridors"] as const).map((name) => (
+                        <button
+                          key={name}
+                          type="button"
+                          className="chip"
+                          aria-pressed={show[name]}
+                          onClick={() => setShow((previous) => ({ ...previous, [name]: !previous[name] }))}
+                        >
+                          {name === "routes" ? "Routes" : "Corridors"}
+                        </button>
+                      ))}
+                    </div>
+                  </PanelSection>
+
+                  <PanelSection heading="Mitigation zones">
+                    {zoneChips}
+                    <p className="field-hint">Choose which kinds are drawn. The plan itself does not change.</p>
+                  </PanelSection>
+                </>
               )}
 
               <LayerNotes manifest={manifest} active={activeLayers} />
@@ -256,10 +296,19 @@ export default function RoutePlanner({ projectId }: Props) {
           )}
 
           {result && tab === "routes" && (
-            <RoutesPanel result={result} selected={selectedRoute} onSelect={setSelectedRoute} />
+            <RoutesPanel result={result} selected={selectedRoute} onSelect={selectRoute} />
           )}
           {result && tab === "heat" && <HeatPanel result={result} selected={selectedRoute} />}
-          {result && tab === "mitigation" && <MitigationPanel result={result} selected={selectedRoute} />}
+          {result && tab === "mitigation" && (
+            <MitigationPanel
+              result={result}
+              selected={selectedRoute}
+              zoneKinds={zoneKinds}
+              zoneChips={zoneChips}
+              highlightZone={highlightZone}
+              onZoneClick={pickZone}
+            />
+          )}
           {result && tab === "method" && <MethodPanel result={result} />}
         </Panel>
       </div>

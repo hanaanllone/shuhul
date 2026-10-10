@@ -1,6 +1,7 @@
 // What the planner reads once routes exist: the alternatives side by
 // side, the heat and flood picture for one route, and what it owes.
 
+import type { ReactNode } from "react";
 import { PanelSection, Stat } from "../../components/ui";
 import { apiUrl } from "../../lib/api";
 import { ROUTE_COLORS, area, num, routeParts, signed, withUnit } from "../../lib/format";
@@ -165,7 +166,7 @@ export function HeatPanel({ result, selected }: RouteProps) {
 
       <PanelSection heading="Flood">
         {!flood?.available ? (
-          <p className="note">No flood layer for this district yet.</p>
+          <p className="note">No flood data for this district.</p>
         ) : (
           <>
             <div className="stat-grid">
@@ -195,7 +196,14 @@ const PLAN_STATUS: Record<string, string> = {
   no_zones: "No suitable land for green infrastructure was found near this route.",
 };
 
-export function MitigationPanel({ result, selected }: RouteProps) {
+interface MitigationProps extends RouteProps {
+  zoneKinds: Record<string, boolean>;
+  zoneChips: ReactNode;
+  highlightZone: string | null;
+  onZoneClick: (zoneId: string) => void;
+}
+
+export function MitigationPanel({ result, selected, zoneKinds, zoneChips, highlightZone, onZoneClick }: MitigationProps) {
   const plan = result.impact?.routes?.[selected || ""]?.mitigation_plan;
   if (!plan) return <p className="note">Select a route to see what it owes.</p>;
 
@@ -216,6 +224,11 @@ export function MitigationPanel({ result, selected }: RouteProps) {
       </PanelSection>
 
       <PanelSection heading="Where">
+        {zoneChips}
+        <p className="field-hint" style={{ marginBottom: 10 }}>
+          Choose which kinds are drawn. Select a zone to find it on the map.
+        </p>
+
         {plan.zones.length === 0 ? (
           <p className="note">Nothing to list.</p>
         ) : (
@@ -225,9 +238,18 @@ export function MitigationPanel({ result, selected }: RouteProps) {
                 <tr><th>Zone</th><th>Type</th><th>Planned</th><th>Available</th></tr>
               </thead>
               <tbody>
-                {plan.zones.map((zone) => (
-                  <tr key={zone.zone_id}>
-                    <td>{zone.zone_id.replace("Zone ", "")}</td>
+                {plan.zones.filter((zone) => zoneKinds[zone.intervention]).map((zone) => (
+                  <tr key={zone.zone_id} className={highlightZone === zone.zone_id ? "is-chosen" : ""}>
+                    <td>
+                      <button
+                        type="button"
+                        className="link-btn"
+                        aria-pressed={highlightZone === zone.zone_id}
+                        onClick={() => onZoneClick(zone.zone_id)}
+                      >
+                        {zone.zone_id.replace("Zone ", "")}
+                      </button>
+                    </td>
                     <td>
                       <span className="dot" style={{ background: INTERVENTIONS[zone.intervention]?.color, marginRight: 6 }} />
                       {INTERVENTIONS[zone.intervention]?.label || zone.intervention}
