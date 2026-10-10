@@ -60,6 +60,19 @@ interface Evidence {
 
 type EvidenceState = { status: "loading" } | { status: "ready"; evidence: Evidence } | { status: "failed"; message: string };
 
+// What a report says, put together from its own words.
+interface Brief {
+  type: string | null;
+  district: string | null;
+  places: string[];
+  figures: string[];
+  bodies: string[];
+  key_lines: string[];
+  method: string;
+}
+
+type BriefState = { status: "loading" } | { status: "ready"; brief: Brief } | { status: "failed"; message: string };
+
 // What the archive tab is showing: the list, one report, or the worked example.
 type ArchiveView = { kind: "list" } | { kind: "article"; article: Article } | { kind: "example" };
 
@@ -81,6 +94,31 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const KASHMIR: [number, number] = [34.08, 74.8];
+
+function BriefView({ state }: { state?: BriefState }) {
+  if (!state) return null;
+  if (state.status === "loading") return <p className="note" style={{ marginTop: 8 }}>Reading the report...</p>;
+  if (state.status === "failed") return <p className="message" style={{ marginTop: 8 }}>{state.message}</p>;
+
+  const { brief } = state;
+  const where = [...brief.places, brief.district].filter(Boolean).join(", ");
+
+  return (
+    <div className="record">
+      <div className="record-title">In brief</div>
+      <ul>
+        {brief.type && <li>About: {brief.type.toLowerCase()}.</li>}
+        {where && <li>Where: {where}.</li>}
+        {brief.figures.length > 0 && <li>Figures given: {brief.figures.join("; ")}.</li>}
+        {brief.bodies.length > 0 && <li>Bodies named: {brief.bodies.join(", ")}.</li>}
+      </ul>
+      {brief.key_lines.map((line) => (
+        <p key={line} className="record-quote">“{line}”</p>
+      ))}
+      <p className="note">{brief.method}</p>
+    </div>
+  );
+}
 
 function RecordView({ state, place }: { state?: EvidenceState; place?: string }) {
   if (!state) return null;
@@ -145,10 +183,12 @@ export default function Watch({ onNavigate }: Props) {
   // The satellite record around each report that has been asked about.
   const [evidence, setEvidence] = useState<Record<number, EvidenceState>>({});
 
+  // Briefs that have been asked for, by "live-<id>" or "archive-<id>".
+  const [briefs, setBriefs] = useState<Record<string, BriefState>>({});
+
   const [articles, setArticles] = useState<Article[]>([]);
   const [archive, setArchive] = useState<ArchiveView>({ kind: "list" });
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [analysing, setAnalysing] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
 
   function load() {
@@ -221,6 +261,30 @@ export default function Watch({ onNavigate }: Props) {
     }
   }
 
+  async function summarise(key: string, path: string) {
+    // A second press folds the brief away again.
+    if (briefs[key]) {
+      setBriefs((previous) => {
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+
+    setBriefs((previous) => ({ ...previous, [key]: { status: "loading" } }));
+
+    try {
+      const brief = await api<Brief>(path);
+      setBriefs((previous) => ({ ...previous, [key]: { status: "ready", brief } }));
+    } catch (problem) {
+      setBriefs((previous) => ({
+        ...previous,
+        [key]: { status: "failed", message: errorMessage(problem, "The report could not be summarised.") },
+      }));
+    }
+  }
+
   function openArchive(view: ArchiveView) {
     setArchive(view);
     setAnalysis(null);
@@ -230,22 +294,6 @@ export default function Watch({ onNavigate }: Props) {
       api<Analysis>("/api/environmental-watch/demo-analysis")
         .then(setAnalysis)
         .catch(() => setAnalysisError("The worked example could not be loaded."));
-    }
-  }
-
-  async function analyse(chosen: Article) {
-    setAnalysing(true);
-    setAnalysisError("");
-
-    try {
-      const result = await post<{ analysis: Analysis }>(`/api/environmental-watch/analyse/${chosen.article_id}`);
-      setAnalysis(result.analysis);
-    } catch {
-      setAnalysisError(
-        "This report could not be analysed. Reading a report needs the language model, which is not connected yet."
-      );
-    } finally {
-      setAnalysing(false);
     }
   }
 
@@ -386,6 +434,13 @@ export default function Watch({ onNavigate }: Props) {
                     <a href={issue.url} target="_blank" rel="noreferrer">{issue.title}</a>
                     {issue.excerpt && <p className="note" style={{ marginTop: 4 }}>{issue.excerpt}</p>}
                     <div className="chip-row" style={{ gap: 14 }}>
+                      <button
+                        className="link-btn"
+                        style={{ fontSize: 12 }}
+                        onClick={() => summarise(`live-${issue.id}`, `/api/watch/issues/${issue.id}/brief`)}
+                      >
+                        {briefs[`live-${issue.id}`] ? "Hide the summary" : "Summarise"}
+                      </button>
                       {issue.lat !== null && (
                         <button className="link-btn" style={{ fontSize: 12 }} onClick={() => openOnMap(issue)}>
                           Open in the route planner
@@ -398,6 +453,7 @@ export default function Watch({ onNavigate }: Props) {
                       )}
                     </div>
 
+                    <BriefView state={briefs[`live-${issue.id}`]} />
                     <RecordView state={evidence[issue.id]} place={issue.places[0]?.name} />
                   </div>
                 ))}
@@ -456,16 +512,19 @@ export default function Watch({ onNavigate }: Props) {
                     <span>{archive.article.source || "Source in article"}</span>
                   </div>
 
-                  {!analysis && (
-                    <button
-                      className="btn is-dark is-block"
-                      style={{ marginTop: 16 }}
-                      disabled={analysing}
-                      onClick={() => analyse(archive.article)}
-                    >
-                      {analysing ? "Reading the report..." : "Analyse this report"}
-                    </button>
-                  )}
+                  <button
+                    className="btn is-dark is-block"
+                    style={{ marginTop: 16 }}
+                    onClick={() =>
+                      summarise(
+                        `archive-${archive.article.article_id}`,
+                        `/api/environmental-watch/articles/${archive.article.article_id}/brief`
+                      )
+                    }
+                  >
+                    {briefs[`archive-${archive.article.article_id}`] ? "Hide the summary" : "Summarise this report"}
+                  </button>
+                  <BriefView state={briefs[`archive-${archive.article.article_id}`]} />
                 </>
               )}
 

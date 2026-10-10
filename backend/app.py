@@ -34,6 +34,7 @@ from .services.watch_ingest import register_watch_routes
 from .services.climate import register_climate_routes
 from .services.area_environment import register_area_routes
 from .services.site_finder import register_site_routes
+from .services.report_brief import register_brief_routes
 
 app = Flask(__name__)
 
@@ -48,6 +49,7 @@ register_watch_routes(app)
 register_climate_routes(app)
 register_area_routes(app)
 register_site_routes(app)
+register_brief_routes(app)
 register_map_layer_routes(app)
 
 app.config.update(

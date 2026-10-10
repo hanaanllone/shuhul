@@ -681,6 +681,13 @@
   padding-left: 18px;
 }
 
+.record-quote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--sage);
+  font-style: italic;
+}
+
 .record li + li {
   margin-top: 4px;
 }

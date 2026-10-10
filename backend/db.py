@@ -453,6 +453,15 @@ def list_watch_issues(district=None, category=None, since=None, limit=200):
     return issues
 
 
+def get_watch_issue(issue_id):
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(watch_issues.c.id, watch_issues.c.url, watch_issues.c.source, watch_issues.c.title)
+            .where(watch_issues.c.id == issue_id)
+        ).mappings().first()
+    return dict(row) if row else None
+
+
 def latest_watch_fetch():
     with engine.connect() as conn:
         return conn.execute(select(func.max(watch_issues.c.fetched_at))).scalar_one()
