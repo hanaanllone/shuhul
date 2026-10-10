@@ -1,0 +1,46 @@
+/* Shuhul design tokens. Forest, sage, ivory and slate, with Inter. */
+
+:root {
+  /* Colour */
+  --forest-950: #142a28;
+  --forest-900: #19322f;
+  --forest-800: #203c32;
+  --forest-700: #2d4c41;
+  --sage: #c9d9b2;
+  --sage-soft: #e7ede3;
+  --ivory: #f8f8f4;
+  --slate: #647068;
+  --ink: #0f1f1d;
+
+  --text-on-dark: var(--ivory);
+  --muted-on-dark: #a9b6ae;
+  --text-on-light: var(--ink);
+  --muted-on-light: var(--slate);
+  --line-on-dark: rgba(201, 217, 178, 0.26);
+  --line-on-light: rgba(32, 60, 50, 0.16);
+
+  /* Meaning. Used with a label, never on their own. */
+  --low: #5f9b6b;
+  --moderate: #d9a441;
+  --high: #c0563a;
+
+  /* Route alternatives */
+  --route-a: #c0563a;
+  --route-b: #d9a441;
+  --route-c: #2f8f6b;
+
+  /* Shape */
+  --radius-xl: 40px;
+  --radius-lg: 28px;
+  --radius-md: 16px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
+
+  /* Type */
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Anton", "Inter", sans-serif;
+
+  /* Space */
+  --page-x: clamp(20px, 4vw, 64px);
+  --nav-h: 72px;
+}
