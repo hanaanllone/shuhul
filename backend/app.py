@@ -4,11 +4,12 @@ import uuid
 from collections import defaultdict, deque
 from functools import wraps
 
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request, send_file, session
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from .config import (
+    OUTPUT_ROOT,
     FRONTEND_ORIGINS,
     INLINE_WORKER,
     IS_PRODUCTION,
@@ -28,6 +29,7 @@ from .services.environmental_watch_demo_route import (
 )
 from .services.watch_ingest import register_watch_routes
 from .services.climate import register_climate_routes
+from .services.area_environment import register_area_routes
 
 app = Flask(__name__)
 
@@ -40,6 +42,7 @@ register_environmental_watch_routes(app)
 register_environmental_watch_demo_route(app)
 register_watch_routes(app)
 register_climate_routes(app)
+register_area_routes(app)
 register_map_layer_routes(app)
 
 app.config.update(
@@ -253,6 +256,19 @@ def project_status(user, project_id):
         "result": project.get("result"),
     })
 
+
+@app.get("/api/projects/<project_id>/report")
+@login_required
+def project_report(user, project_id):
+    """The printable report the pipeline wrote for a finished project."""
+    if not get_project(project_id, user["id"]):
+        return jsonify({"error": "Project not found."}), 404
+
+    path = OUTPUT_ROOT / "projects" / project_id / "report.html"
+    if not path.is_file():
+        return jsonify({"error": "This project has no report yet."}), 404
+
+    return send_file(path, mimetype="text/html")
 
 @app.get("/api/projects/<project_id>/corridors")
 @login_required
