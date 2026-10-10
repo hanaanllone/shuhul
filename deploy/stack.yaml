@@ -37,7 +37,7 @@ Parameters:
       spell slows the machine instead of adding charges. Leave as none otherwise.
   PowerOffAt:
     Type: String
-    Default: "2026-10-16 06:30:00"
+    Default: "2026-10-26 06:30:00"
     Description: >
       When the machine switches itself off, in UTC, so that a forgotten
       stack stops costing money. Only the disk is charged after that.
