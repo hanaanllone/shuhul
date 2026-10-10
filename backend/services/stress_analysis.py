@@ -582,7 +582,11 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
                     "mean_ndwi": round(mean_in(ndwi), 4) if mean_in(ndwi) is not None else None,
                     "canopy_cover_pct": round(canopy_pct, 2) if canopy_pct is not None else None,
                     "built_up_density_pct": round(building_pct, 2) if building_pct is not None else None,
-                    "mean_lst": round(mean_in(lst), 2) if lst_available else None,
+                    # A zone can lack a temperature reading: cloud or snow in every look.
+                    "mean_lst": (
+                        round(mean_in(lst), 2)
+                        if lst_available and mean_in(lst) is not None else None
+                    ),
                     "main_road_pct": round(road_share * 100, 2) if road_share is not None else None,
                     "water_pct": round(water_share * 100, 2) if water_share is not None else None,
                     "zone_ha": round(float(valid.sum()) * cell_ha, 2),
