@@ -228,14 +228,17 @@ def build_weights(
     water_priority,
     heat_priority=0.5,
     flood_priority=0.5,
+    construction_priority=0.5,
 ):
     """
     Turn user-facing 0-1 priorities into environmental weights.
 
-    shortest_priority and construction_priority intentionally do NOT
-    modify this raster. They belong to route_planner.py because they
-    describe the route objective rather than spatial environmental
-    sensitivity.
+    shortest_priority does NOT modify this raster. It belongs to
+    route_planner.py because it describes the route objective rather
+    than how sensitive a place is.
+
+    construction_priority weighs the ground that is hard to build on:
+    steep slopes and standing buildings. At 0.5 it leaves them as they are.
     """
 
     weights = DEFAULT_WEIGHTS.copy()
@@ -259,6 +262,12 @@ def build_weights(
     # Heat and flood priorities control their own factors.
     weights["heat"] *= 0.25 + heat_priority
     weights["flood"] *= 0.25 + flood_priority
+
+    # Ease of construction: steep ground and buildings in the way.
+    construction_scale = 0.5 + construction_priority
+
+    weights["slope"] *= construction_scale
+    weights["buildings"] *= construction_scale
 
     total = sum(weights.values())
 
@@ -520,6 +529,7 @@ def build_cost_surface(
         water_priority=water_priority,
         heat_priority=heat_priority,
         flood_priority=flood_priority,
+        construction_priority=construction_priority,
     )
 
     soft_cost = (
