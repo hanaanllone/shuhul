@@ -1,118 +1,95 @@
 import { useEffect, useState } from "react";
-import LoginSignup from "./LoginSignup";
-import CreateProject from "./CreateProject";
-import Home from "./Home";
-import AOIAnalysis from "./AoiAnalysis";
-import Settings from "./Settings";
-import { getSession } from "./auth/session";
-import EcologicalStress from "./EcologicalStress";
-import EnvironmentalWatch from "./EnvironmentalWatch";
+import NavBar from "./components/NavBar";
+import { api, post } from "./lib/api";
+import type { User } from "./lib/types";
+import AirClimate from "./pages/AirClimate";
+import AreaAnalysis from "./pages/AreaAnalysis";
+import Auth from "./pages/Auth";
+import EcologicalStress from "./pages/EcologicalStress";
+import Home from "./pages/Home";
+import Landing from "./pages/Landing";
+import RoutePlanner from "./pages/RoutePlanner";
+import Settings from "./pages/Settings";
+import Watch from "./pages/Watch";
 
-type Page =
-  | { name: "home" }
-  | { name: "create" }
-  | { name: "project"; id: string }
-  | { name: "aoi" }
-  | { name: "ecological-stress" }
-  | { name: "environmental-watch" }
-  | { name: "settings" };
-
-function readPage(): Page {
-  const hash = window.location.hash.replace(/^#\/?/, "");
-
-  if (hash.startsWith("project/")) {
-    const id = hash.slice("project/".length);
-    if (id) return { name: "project", id };
-  }
-
-  if (hash === "create") return { name: "create" };
-  if (hash === "aoi") return { name: "aoi" };
-  if (hash === "ecological-stress") return { name: "ecological-stress" };
-  if (hash === "environmental-watch") return { name: "environmental-watch" };
-  if (hash === "settings") return { name: "settings" };
-
-  return { name: "home" };
+// The address after "#/" decides the page: "plan", "plan/<id>",
+// "environment/stress" and so on.
+function readPath(): string {
+  return window.location.hash.replace(/^#\/?/, "");
 }
 
+const PUBLIC_PATHS = ["", "login", "signup"];
+
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
-  const [page, setPage] = useState<Page>(readPage);
+  const [user, setUser] = useState<User | null | undefined>(undefined);
+  const [path, setPath] = useState(readPath);
 
   useEffect(() => {
-    async function checkSession() {
-      const user = await getSession();
-      setAuthenticated(user !== null);
-      setCheckingSession(false);
-    }
+    api<{ authenticated: boolean; user?: User }>("/api/auth/session")
+      .then((data) => setUser(data.authenticated && data.user ? data.user : null))
+      .catch(() => setUser(null));
 
-    checkSession();
-
-    const handleHashChange = () => setPage(readPage());
-    window.addEventListener("hashchange", handleHashChange);
-
-    return () => window.removeEventListener("hashchange", handleHashChange);
+    const onHashChange = () => setPath(readPath());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
   function navigate(target: string) {
     window.location.hash = `/${target}`;
   }
 
-  function openProject(projectId: string) {
-    window.location.hash = `/project/${projectId}`;
+  async function logout() {
+    await post("/api/auth/logout").catch(() => undefined);
+    setUser(null);
+    navigate("");
   }
 
-  function handleLogout() {
-    setAuthenticated(false);
-    navigate("home");
+  if (user === undefined) return null;
+
+  // ---------- Signed out ----------
+  if (!user) {
+    if (path === "login" || path === "signup") {
+      return (
+        <Auth
+          key={path}
+          mode={path}
+          onNavigate={navigate}
+          onAuthenticated={(signedIn) => {
+            setUser(signedIn);
+            navigate("home");
+          }}
+        />
+      );
+    }
+
+    return <Landing onNavigate={navigate} />;
   }
 
-  if (checkingSession) {
-    return <div style={{ minHeight: "100vh", padding: 30 }}>Loading Shuhul...</div>;
+  // ---------- Signed in ----------
+  const current = PUBLIC_PATHS.includes(path) ? "home" : path;
+  const [section, detail] = current.split("/");
+
+  let page;
+  if (section === "plan") {
+    page = <RoutePlanner key={detail || "new"} projectId={detail} onNavigate={navigate} />;
+  } else if (current === "environment/area") {
+    page = <AreaAnalysis />;
+  } else if (current === "environment/stress") {
+    page = <EcologicalStress />;
+  } else if (current === "environment/air") {
+    page = <AirClimate />;
+  } else if (section === "watch") {
+    page = <Watch onNavigate={navigate} />;
+  } else if (section === "settings") {
+    page = <Settings user={user} onLogout={logout} />;
+  } else {
+    page = <Home onNavigate={navigate} />;
   }
 
-  if (!authenticated) {
-    return (
-      <LoginSignup
-        onLogin={() => {
-          setAuthenticated(true);
-          navigate("home");
-        }}
-      />
-    );
-  }
-
-  if (page.name === "home") {
-    return <Home onNavigate={navigate} onOpenProject={openProject} />;
-  }
-
-  if (page.name === "create") {
-    return <CreateProject onNavigate={navigate} />;
-  }
-
-  if (page.name === "project") {
-    return (
-      <CreateProject
-        projectId={page.id}
-        onNavigate={navigate}
-      />
-    );
-  }
-
-  if (page.name === "aoi") {
-    return <AOIAnalysis onNavigate={navigate} />;
-  }
-  if (page.name === "ecological-stress") {
-    return <EcologicalStress onNavigate={navigate} />;
-  }
-  if (page.name === "environmental-watch") {
   return (
-    <EnvironmentalWatch
-      onNavigate={(path) => {
-        window.location.hash = path;
-      }}
-    />
+    <>
+      <NavBar current={current} user={user} onNavigate={navigate} onLogout={logout} />
+      {page}
+    </>
   );
-}
-  return <Settings onNavigate={navigate} onLogout={handleLogout} />;
 }
