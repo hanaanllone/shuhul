@@ -28,6 +28,7 @@ interface Environment {
   landcover?: { name: string; pct: number }[];
   flood?: { classes: { name: string; pct: number }[]; flood_prone_pct: number; note: string };
   water?: { recorded_water_km2: number | null; lost_water_km2: number | null; note: string };
+  water_now?: { cover_pct: number; source: string };
   change?: { years: YearRow[]; note: string };
 }
 
@@ -424,9 +425,9 @@ export default function AreaAnalysis() {
                   <PanelSection heading="Water and flood">
                     <div className="stat-grid">
                       <Stat
-                        label="Open water"
-                        value={`${num(legacy?.water_cover?.percentage, 1)}%`}
-                        note="From the water index"
+                        label="Water and wetland"
+                        value={`${num(environment.water_now?.cover_pct ?? legacy?.water_cover?.percentage, 1)}%`}
+                        note={environment.water_now?.source || "Satellite water index"}
                       />
                       <Stat
                         label="Flood-prone"
