@@ -170,6 +170,31 @@ def get_user(user_id):
     return dict(row) if row else None
 
 
+def update_user(user_id, organisation, name):
+    with engine.begin() as conn:
+        conn.execute(
+            update(users)
+            .where(users.c.id == user_id)
+            .values(organisation=organisation, name=name)
+        )
+
+
+def get_password_hash(user_id):
+    with engine.connect() as conn:
+        return conn.execute(
+            select(users.c.password_hash).where(users.c.id == user_id)
+        ).scalar_one_or_none()
+
+
+def set_password_hash(user_id, password_hash):
+    with engine.begin() as conn:
+        conn.execute(
+            update(users)
+            .where(users.c.id == user_id)
+            .values(password_hash=password_hash)
+        )
+
+
 # ------------------------------------------------------------
 # PROJECTS
 # ------------------------------------------------------------

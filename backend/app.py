@@ -18,6 +18,7 @@ from .config import (
 )
 from .db import (
     init_db, create_user, get_user_by_email, get_user,
+    update_user, get_password_hash, set_password_hash,
     create_project, get_project, list_projects, count_active_projects,
 )
 from .services.map_layers import register_map_layer_routes, build_project_corridors
@@ -194,6 +195,44 @@ def session_info():
 def logout():
     session.clear()
     return jsonify({"authenticated": False})
+
+@app.post("/api/account/profile")
+@login_required
+def update_profile(user):
+    body = request.get_json(silent=True) or {}
+    organisation = str(body.get("organisation", "")).strip()
+    name = str(body.get("name", "")).strip() or None
+
+    if not organisation:
+        return jsonify({"error": "Organisation is required."}), 400
+    if len(organisation) > 200 or len(name or "") > 200:
+        return jsonify({"error": "That is too long."}), 400
+
+    update_user(user["id"], organisation, name)
+    return jsonify({"user": get_user(user["id"])})
+
+
+@app.post("/api/account/password")
+@login_required
+def change_password(user):
+    body = request.get_json(silent=True) or {}
+    current = str(body.get("current", ""))
+    new = str(body.get("new", ""))
+
+    # Guessing the current password is held back like signing in is.
+    if too_many_attempts(user["email"]):
+        return jsonify({
+            "error": "Too many attempts. Please wait a few minutes."
+        }), 429
+
+    if not check_password_hash(get_password_hash(user["id"]) or "", current):
+        return jsonify({"error": "The current password is not right."}), 403
+    if len(new) < 8:
+        return jsonify({"error": "The new password must be at least 8 characters."}), 400
+
+    set_password_hash(user["id"], generate_password_hash(new))
+    return jsonify({"changed": True})
+
 
 @app.get("/api/projects")
 @login_required
