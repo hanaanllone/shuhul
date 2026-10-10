@@ -12,15 +12,21 @@ It also answers "what if": how the surface temperature of a drawn area
 would move if part of it were planted, given green roofs, paved or built on.
 
     POST /api/area/what-if       {"district", "geometry", "change", "share"}
+
+And it reads the surroundings of a single point, which is how a news
+report is set beside the satellite record of the place it names.
+
+    POST /api/area/around        {"lat", "lng"}
 """
 
+from functools import lru_cache
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.mask import mask
-from shapely.geometry import shape
+from shapely.geometry import Point, mapping, shape
 
 from ..config import PROCESSED_ROOT, PROJECT_ROOT
 from . import thermal
@@ -63,6 +69,18 @@ LAND_NAMES = {
     "roofs": "roofs",
     "unbuilt": "land that is not water and not already built-up",
 }
+
+# How far around a reported place the record is read.
+AROUND_RADIUS_M = 500.0
+
+# Smaller movements than these between the early and late years are
+# treated as no change: vegetation in percent, the built-up index in its
+# own units. Yearly temperature is too uneven to read a trend at one place.
+STEADY_VEGETATION_PCT = 5.0
+STEADY_BUILT_UP = 0.03
+
+# Over water the vegetation index follows weeds and water level, not land.
+MOSTLY_WATER_PCT = 50.0
 
 WHAT_IF_MAX_KM2 = 25.0
 WATER_CODES = (80, 90)
@@ -363,9 +381,131 @@ def what_if(district, geometry, change, share):
     }
 
 
+@lru_cache(maxsize=1)
+def _district_shapes():
+    """Every district outline in WGS84, read once."""
+    shapes = {}
+    for path in sorted((Path(PROJECT_ROOT) / "districts-geojson").glob("*.geojson")):
+        frame = gpd.read_file(path)
+        if frame.crs is None:
+            frame = frame.set_crs("EPSG:4326")
+        shapes[path.stem] = frame.to_crs("EPSG:4326").geometry.union_all()
+    return shapes
+
+
+def _district_at(lat, lng):
+    """The district holding a point, preferring one with the full set of layers."""
+    point = Point(lng, lat)
+    holding = [code for code, outline in _district_shapes().items() if outline.contains(point)]
+    holding = [code for code in holding if (Path(PROCESSED_ROOT) / code / "ndvi.tif").exists()]
+
+    for code in holding:
+        if (Path(PROCESSED_ROOT) / code / "lst.tif").exists():
+            return code
+    return holding[0] if holding else None
+
+
+def _reading(summary):
+    """The summary of an area as plain sentences, most telling first."""
+    lines = []
+
+    water_pct = sum(
+        item["pct"] for item in summary.get("landcover", []) if item["name"] in ("Water", "Wetland")
+    )
+    mostly_water = water_pct >= MOSTLY_WATER_PCT
+    if mostly_water:
+        lines.append(
+            f"{water_pct:.0f}% of the area is open water or wetland, so the vegetation "
+            "index says little about the land here."
+        )
+
+    rows = [row for row in summary.get("change", {}).get("years", []) if row.get("ndvi") is not None]
+    if len(rows) >= 6 and not mostly_water:
+        early, late = rows[:3], rows[-3:]
+        then = f"{early[0]['year']} to {early[-1]['year']}"
+        now = f"{late[0]['year']} to {late[-1]['year']}"
+
+        def mean(group, key):
+            values = [row[key] for row in group if row.get(key) is not None]
+            return sum(values) / len(values) if values else None
+
+        before, after = mean(early, "ndvi"), mean(late, "ndvi")
+        if before and after and before > 0:
+            moved = 100 * (after - before) / before
+            figures = f"the summer vegetation index averaged {before:.2f} in {then} and {after:.2f} in {now}"
+            if abs(moved) < STEADY_VEGETATION_PCT:
+                lines.append(f"Vegetation has held steady: {figures}.")
+            else:
+                lines.append(f"Vegetation {'fell' if moved < 0 else 'rose'} {abs(moved):.0f}%: {figures}.")
+
+        before, after = mean(early, "ndbi"), mean(late, "ndbi")
+        if before is not None and after is not None and abs(after - before) >= STEADY_BUILT_UP:
+            lines.append(
+                f"The built-up index {'rose' if after > before else 'fell'} between {then} and {now}, "
+                f"a sign of {'more' if after > before else 'less'} hard surface."
+            )
+
+    heat = summary.get("heat", {})
+    if heat.get("mean_lst_c") is not None:
+        lines.append(f"Summer surface temperature averages {heat['mean_lst_c']:.1f} °C.")
+
+    trees = summary.get("trees", {})
+    if trees.get("canopy_pct") is not None:
+        lines.append(f"Tree canopy covers {trees['canopy_pct']:.0f}% of the area.")
+
+    flood = summary.get("flood", {})
+    if flood.get("flood_prone_pct"):
+        lines.append(f"{flood['flood_prone_pct']:.0f}% is flood-prone on the screening index.")
+
+    lost_ha = 100 * (summary.get("water", {}).get("lost_water_km2") or 0.0)
+    if lost_ha >= 0.1:
+        lines.append(f"{lost_ha:.1f} ha that was recorded as water since 1984 is now land.")
+
+    return lines
+
+
+def around(lat, lng, radius_m=AROUND_RADIUS_M):
+    """What the layers show within a radius of a point."""
+    lat, lng = float(lat), float(lng)
+    district = _district_at(lat, lng)
+    if district is None:
+        raise AreaError("This place is outside the districts Shuhul has data for.")
+
+    with rasterio.open(Path(PROCESSED_ROOT) / district / "ndvi.tif") as src:
+        crs = src.crs
+
+    circle = (
+        gpd.GeoSeries([Point(lng, lat)], crs="EPSG:4326")
+        .to_crs(crs).buffer(radius_m).to_crs("EPSG:4326").iloc[0]
+    )
+
+    summary = summarise(district, mapping(circle))
+    summary["scope"] = f"within {radius_m:.0f} m"
+    summary["radius_m"] = radius_m
+    summary["reading"] = _reading(summary) or [
+        "Only the base layers exist for this district so far, so there is no "
+        "year-by-year record to set beside the report."
+    ]
+    summary["caution"] = (
+        "This is what the satellite record shows around the place named in the "
+        "report. It does not confirm or refute the report, and the place itself "
+        "was taken from the text, so it may be off."
+    )
+    return summary
+
+
 def register_area_routes(app):
-    """Register POST /api/area/environment and POST /api/area/what-if."""
+    """Register the /api/area routes: environment, what-if and around."""
     from flask import jsonify, request
+
+    @app.post("/api/area/around")
+    def area_around():
+        payload = request.get_json(silent=True) or {}
+
+        try:
+            return jsonify(around(payload.get("lat"), payload.get("lng")))
+        except (AreaError, TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc) or "A place is required."}), 400
 
     @app.post("/api/area/what-if")
     def area_what_if():

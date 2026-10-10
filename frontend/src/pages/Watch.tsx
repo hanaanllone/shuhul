@@ -51,6 +51,15 @@ interface Analysis {
   source?: { title?: string; date?: string | null; publisher?: string | null };
 }
 
+// What the map layers show around the place a report names.
+interface Evidence {
+  reading: string[];
+  caution: string;
+  scope: string;
+}
+
+type EvidenceState = { status: "loading" } | { status: "ready"; evidence: Evidence } | { status: "failed"; message: string };
+
 // What the archive tab is showing: the list, one report, or the worked example.
 type ArchiveView = { kind: "list" } | { kind: "article"; article: Article } | { kind: "example" };
 
@@ -72,6 +81,27 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const KASHMIR: [number, number] = [34.08, 74.8];
+
+function RecordView({ state, place }: { state?: EvidenceState; place?: string }) {
+  if (!state) return null;
+  if (state.status === "loading") return <p className="note" style={{ marginTop: 8 }}>Reading the record...</p>;
+  if (state.status === "failed") return <p className="message" style={{ marginTop: 8 }}>{state.message}</p>;
+
+  return (
+    <div className="record">
+      <div className="record-title">
+        {place ? `${place}, ` : ""}
+        {state.evidence.scope}
+      </div>
+      <ul>
+        {state.evidence.reading.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <p className="note">{state.evidence.caution}</p>
+    </div>
+  );
+}
 
 function AnalysisView({ analysis }: { analysis: Analysis }) {
   return (
@@ -111,6 +141,9 @@ export default function Watch({ onNavigate }: Props) {
   const [category, setCategory] = useState("");
   const [district, setDistrict] = useState("");
   const [query, setQuery] = useState("");
+
+  // The satellite record around each report that has been asked about.
+  const [evidence, setEvidence] = useState<Record<number, EvidenceState>>({});
 
   const [articles, setArticles] = useState<Article[]>([]);
   const [archive, setArchive] = useState<ArchiveView>({ kind: "list" });
@@ -162,6 +195,30 @@ export default function Watch({ onNavigate }: Props) {
       })
     );
     onNavigate("plan");
+  }
+
+  async function checkRecord(issue: Issue) {
+    // A second press folds the answer away again.
+    if (evidence[issue.id]) {
+      setEvidence((previous) => {
+        const next = { ...previous };
+        delete next[issue.id];
+        return next;
+      });
+      return;
+    }
+
+    setEvidence((previous) => ({ ...previous, [issue.id]: { status: "loading" } }));
+
+    try {
+      const found = await post<Evidence>("/api/area/around", { lat: issue.lat, lng: issue.lng });
+      setEvidence((previous) => ({ ...previous, [issue.id]: { status: "ready", evidence: found } }));
+    } catch (problem) {
+      setEvidence((previous) => ({
+        ...previous,
+        [issue.id]: { status: "failed", message: errorMessage(problem, "The record could not be read.") },
+      }));
+    }
   }
 
   function openArchive(view: ArchiveView) {
@@ -328,11 +385,20 @@ export default function Watch({ onNavigate }: Props) {
                     </div>
                     <a href={issue.url} target="_blank" rel="noreferrer">{issue.title}</a>
                     {issue.excerpt && <p className="note" style={{ marginTop: 4 }}>{issue.excerpt}</p>}
-                    {issue.lat !== null && (
-                      <button className="link-btn" style={{ fontSize: 12 }} onClick={() => openOnMap(issue)}>
-                        Open in the route planner
-                      </button>
-                    )}
+                    <div className="chip-row" style={{ gap: 14 }}>
+                      {issue.lat !== null && (
+                        <button className="link-btn" style={{ fontSize: 12 }} onClick={() => openOnMap(issue)}>
+                          Open in the route planner
+                        </button>
+                      )}
+                      {issue.lat !== null && issue.location_precision === "place" && (
+                        <button className="link-btn" style={{ fontSize: 12 }} onClick={() => checkRecord(issue)}>
+                          {evidence[issue.id] ? "Hide the satellite record" : "What the satellite record shows"}
+                        </button>
+                      )}
+                    </div>
+
+                    <RecordView state={evidence[issue.id]} place={issue.places[0]?.name} />
                   </div>
                 ))}
               </PanelSection>

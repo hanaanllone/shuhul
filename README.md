@@ -49,7 +49,10 @@ days over the national standard.
 **Environmental Watch.** Reads Greater Kashmir, Free Press Kashmir and Kashmir
 Life every few hours, keeps the environmental reports, sorts them by type and
 places them on the map. A report opens in the planner at the place it names,
-with the relevant layers switched on.
+with the relevant layers switched on. It can also be set beside the
+satellite record: how vegetation and hard surface have moved within 500 m of
+that place since 2017. That shows where to look; it does not confirm or
+refute the report.
 
 **Report.** Every project has a printable report with its routes, figures,
 method and limits.
