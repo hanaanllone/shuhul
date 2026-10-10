@@ -1,10 +1,7 @@
-import { Panel, PanelSection } from "../components/ui";
-import type { User } from "../lib/types";
-
-interface Props {
-  user: User;
-  onLogout: () => void;
-}
+import { useState } from "react";
+import type { FormEvent } from "react";
+import { Panel, TextField } from "../components/ui";
+import { errorMessage, post } from "../lib/api";
 
 const SOURCES: [string, string][] = [
   ["Base map", "OpenStreetMap contributors, Humanitarian style by HOT"],
@@ -18,7 +15,77 @@ const SOURCES: [string, string][] = [
   ["News reports", "Greater Kashmir, Free Press Kashmir and Kashmir Life, linked to the source"],
 ];
 
-export default function Settings({ user, onLogout }: Props) {
+function ChangePassword() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setDone(false);
+    setError("");
+
+    if (next !== again) {
+      setError("The two new passwords are not the same.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await post("/api/account/password", { current, new: next });
+      setCurrent("");
+      setNext("");
+      setAgain("");
+      setDone(true);
+    } catch (problem) {
+      setError(errorMessage(problem, "Could not change the password."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <TextField
+        label="Current password"
+        type="password"
+        value={current}
+        onChange={setCurrent}
+        required
+        autoComplete="current-password"
+      />
+      <TextField
+        label="New password"
+        type="password"
+        value={next}
+        onChange={setNext}
+        required
+        autoComplete="new-password"
+        hint="At least 8 characters."
+      />
+      <TextField
+        label="New password again"
+        type="password"
+        value={again}
+        onChange={setAgain}
+        required
+        autoComplete="new-password"
+      />
+
+      {error && <p className="message" style={{ marginTop: 14 }}>{error}</p>}
+      {done && <p className="note" style={{ marginTop: 14 }}>Password changed.</p>}
+
+      <button className="btn is-dark" style={{ marginTop: 18 }} disabled={busy}>
+        {busy ? "Changing..." : "Change password"}
+      </button>
+    </form>
+  );
+}
+
+export default function Settings() {
   return (
     <main className="page">
       <div className="page-head">
@@ -26,16 +93,8 @@ export default function Settings({ user, onLogout }: Props) {
       </div>
 
       <div className="air-grid">
-        <Panel title="Account">
-          <table className="table">
-            <tbody>
-              <tr><td>Email</td><td>{user.email}</td></tr>
-              <tr><td>Organisation</td><td>{user.organisation}</td></tr>
-            </tbody>
-          </table>
-          <PanelSection>
-            <button className="btn is-dark" onClick={onLogout}>Sign out</button>
-          </PanelSection>
+        <Panel title="Password">
+          <ChangePassword />
         </Panel>
 
         <Panel title="Where the data comes from">

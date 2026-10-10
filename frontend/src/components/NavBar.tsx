@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { User } from "../lib/types";
 
 interface NavItem {
@@ -10,6 +11,7 @@ interface NavItem {
 // Related tools sit together under one heading.
 const ITEMS: NavItem[] = [
   { label: "Home", path: "home" },
+  { label: "Watch", path: "watch" },
   { label: "Route plan", path: "plan" },
   {
     label: "Environment",
@@ -19,7 +21,6 @@ const ITEMS: NavItem[] = [
       { label: "Air and temperature", path: "environment/air", hint: "Today and the past year" },
     ],
   },
-  { label: "Watch", path: "watch" },
 ];
 
 interface Props {
@@ -27,6 +28,24 @@ interface Props {
   user: User | null;
   onNavigate: (path: string) => void;
   onLogout: () => void;
+}
+
+function Icon({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
 }
 
 export default function NavBar({ current, user, onNavigate, onLogout }: Props) {
@@ -54,6 +73,8 @@ export default function NavBar({ current, user, onNavigate, onLogout }: Props) {
     setOpen(null);
     onNavigate(path);
   }
+
+  const who = user?.name || user?.email || "Profile";
 
   return (
     <header className="nav" ref={bar}>
@@ -95,25 +116,38 @@ export default function NavBar({ current, user, onNavigate, onLogout }: Props) {
         )}
       </nav>
 
-      <div className="nav-menu">
+      <div className="nav-icons">
         <button
-          className="nav-link"
-          aria-expanded={open === "account"}
-          aria-haspopup="menu"
-          onClick={() => setOpen(open === "account" ? null : "account")}
+          className={`nav-icon ${current === "profile" ? "is-current" : ""}`}
+          aria-label={`Profile: ${who}`}
+          title={`Profile: ${who}`}
+          onClick={() => go("profile")}
         >
-          {user?.organisation || "Account"} ▾
+          <Icon>
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+          </Icon>
         </button>
 
-        {open === "account" && (
-          <div className="nav-dropdown align-right" role="menu">
-            <button role="menuitem" onClick={() => go("settings")}>
-              Settings
-              <small>{user?.email}</small>
-            </button>
-            <button role="menuitem" onClick={onLogout}>Sign out</button>
-          </div>
-        )}
+        <button
+          className={`nav-icon ${current === "settings" ? "is-current" : ""}`}
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => go("settings")}
+        >
+          <Icon>
+            <circle cx="12" cy="12" r="3" />
+            <circle cx="12" cy="12" r="7" />
+            <path d="M20 12h2.2M1.8 12H4M12 4V1.8M12 22.2V20M17.66 17.66l1.55 1.55M4.79 4.79l1.55 1.55M17.66 6.34l1.55-1.55M4.79 19.21l1.55-1.55" />
+          </Icon>
+        </button>
+
+        <button className="nav-icon" aria-label="Sign out" title="Sign out" onClick={onLogout}>
+          <Icon>
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <path d="M16 17l5-5-5-5M21 12H9" />
+          </Icon>
+        </button>
       </div>
     </header>
   );

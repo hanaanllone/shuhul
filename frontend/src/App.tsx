@@ -8,6 +8,7 @@ import Auth from "./pages/Auth";
 import EcologicalStress from "./pages/EcologicalStress";
 import Home from "./pages/Home";
 import Landing from "./pages/Landing";
+import Profile from "./pages/Profile";
 import RoutePlanner from "./pages/RoutePlanner";
 import Settings from "./pages/Settings";
 import Watch from "./pages/Watch";
@@ -80,8 +81,10 @@ export default function App() {
     page = <AirClimate />;
   } else if (section === "watch") {
     page = <Watch onNavigate={navigate} />;
+  } else if (section === "profile") {
+    page = <Profile user={user} onChange={setUser} />;
   } else if (section === "settings") {
-    page = <Settings user={user} onLogout={logout} />;
+    page = <Settings />;
   } else {
     page = <Home onNavigate={navigate} />;
   }
