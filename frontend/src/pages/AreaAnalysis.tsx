@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Polygon, Polyline, useMapEvents } from "react-leaflet";
 import BaseMap, { ResizeWatcher } from "../components/BaseMap";
 import DistrictSelect, { useDistricts } from "../components/DistrictSelect";
+import DrawTools from "../components/DrawTools";
+import type { DrawMode } from "../components/DrawTools";
 import { LayerToggles, MapLegend, RasterLayers, useLayerManifest } from "../components/MapLayers";
 import type { ActiveLayers } from "../components/MapLayers";
 import { Panel, PanelSection, SelectField, SliderField, Stat, Tabs } from "../components/ui";
@@ -78,21 +79,21 @@ function verdict(change: number): string {
   return "no noticeable change";
 }
 
-function ClickToDraw({ active, onAdd }: { active: boolean; onAdd: (point: LatLng) => void }) {
-  useMapEvents({
-    click(event) {
-      if (active) onAdd({ lat: event.latlng.lat, lng: event.latlng.lng });
-    },
-  });
-  return null;
-}
+const MODE_HINTS: Record<DrawMode, string> = {
+  idle: "",
+  rectangle: "Click one corner, move the pointer, then click the opposite corner.",
+  polygon: "Click to add corners. Click the first corner again to close the area.",
+  edit: "Drag a corner to reshape the area. Drag a midpoint to add a corner. Press Done when finished.",
+  move: "Drag the area to a new place. Press Done when finished.",
+};
 
 export default function AreaAnalysis() {
   const districts = useDistricts();
   const [district, setDistrict] = useState("sr-c");
   const [tab, setTab] = useState<TabId>("area");
-  const [drawing, setDrawing] = useState(false);
+  const [mode, setMode] = useState<DrawMode>("idle");
   const [vertices, setVertices] = useState<LatLng[]>([]);
+  const [clearKey, setClearKey] = useState(0);
   const [activeLayers, setActiveLayers] = useState<ActiveLayers>({});
 
   const [environment, setEnvironment] = useState<Environment | null>(null);
@@ -162,10 +163,28 @@ export default function AreaAnalysis() {
     }
   }
 
+  function removeArea() {
+    setVertices([]);
+    setMode("idle");
+    setClearKey((previous) => previous + 1);
+    analyse([]);
+  }
+
+  // Edit and Move stay on until pressed again; the area is measured afresh then.
+  function toggleChange(next: "edit" | "move") {
+    if (mode === next) {
+      setMode("idle");
+      analyse(vertices);
+    } else {
+      setMode(next);
+    }
+  }
+
   // A district is analysed as soon as it is chosen.
   useEffect(() => {
     setVertices([]);
-    setDrawing(false);
+    setMode("idle");
+    setClearKey((previous) => previous + 1);
     analyse([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [district]);
@@ -189,28 +208,19 @@ export default function AreaAnalysis() {
         <div className="map-card">
           <BaseMap>
             <ResizeWatcher />
-            <ClickToDraw active={drawing} onAdd={(point) => setVertices((previous) => [...previous, point])} />
             <RasterLayers manifest={manifest} active={activeLayers} />
-
-            {hasShape && !drawing && (
-              <Polygon
-                positions={vertices.map((point): [number, number] => [point.lat, point.lng])}
-                pathOptions={{ color: "#203c32", weight: 3, fillOpacity: 0.08 }}
-              />
-            )}
-            {drawing && vertices.length > 0 && (
-              <Polyline
-                positions={vertices.map((point): [number, number] => [point.lat, point.lng])}
-                pathOptions={{ color: "#203c32", weight: 3, dashArray: "6 6" }}
-              />
-            )}
+            <DrawTools
+              mode={mode}
+              clearKey={clearKey}
+              onShape={(shape) => setVertices(shape || [])}
+              onDrawn={(shape) => {
+                setMode("idle");
+                analyse(shape);
+              }}
+            />
           </BaseMap>
 
-          {drawing && (
-            <div className="map-overlay is-top-left">
-              Click the map to mark corners. {vertices.length} so far; three or more make an area.
-            </div>
-          )}
+          {mode !== "idle" && <div className="map-overlay is-top-left">{MODE_HINTS[mode]}</div>}
           <MapLegend manifest={manifest} active={activeLayers} />
         </div>
 
@@ -229,7 +239,7 @@ export default function AreaAnalysis() {
             <>
               <h2 className="panel-title">What if this area changed?</h2>
 
-              {!hasShape || drawing ? (
+              {!hasShape || mode !== "idle" ? (
                 <p className="note" style={{ marginTop: 10 }}>
                   Draw an area on the Area tab first. The estimate is for a drawn area of 25 km² or less,
                   where surface temperature has been mapped.
@@ -322,45 +332,46 @@ export default function AreaAnalysis() {
             <>
               <DistrictSelect districts={districts} value={district} onChange={setDistrict} />
 
-              <div className="chip-row" style={{ marginTop: 14 }}>
-                {!drawing ? (
+              <div className="field-label" style={{ marginTop: 16 }}>Draw an area</div>
+              <div className="chip-row">
+                {(["rectangle", "polygon"] as const).map((kind) => (
                   <button
+                    key={kind}
                     type="button"
-                    className="btn is-dark is-small"
-                    onClick={() => {
-                      setVertices([]);
-                      setDrawing(true);
-                    }}
+                    className="chip"
+                    aria-pressed={mode === kind}
+                    onClick={() => setMode(mode === kind ? "idle" : kind)}
                   >
-                    Draw an area
+                    {kind === "rectangle" ? "Rectangle" : "Polygon"}
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn is-dark is-small"
-                    disabled={!hasShape}
-                    onClick={() => {
-                      setDrawing(false);
-                      analyse(vertices);
-                    }}
-                  >
-                    Analyse this area
-                  </button>
-                )}
-                {(drawing || hasShape) && (
-                  <button
-                    type="button"
-                    className="btn is-ghost is-small"
-                    onClick={() => {
-                      setVertices([]);
-                      setDrawing(false);
-                      analyse([]);
-                    }}
-                  >
-                    Back to whole district
-                  </button>
-                )}
+                ))}
               </div>
+
+              {hasShape && (
+                <>
+                  <div className="field-label" style={{ marginTop: 12 }}>Change it</div>
+                  <div className="chip-row">
+                    {(["edit", "move"] as const).map((kind) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        className="chip"
+                        aria-pressed={mode === kind}
+                        onClick={() => toggleChange(kind)}
+                      >
+                        {mode === kind ? "Done" : kind === "edit" ? "Edit" : "Move"}
+                      </button>
+                    ))}
+                    <button type="button" className="chip" onClick={removeArea}>Delete</button>
+                  </div>
+                </>
+              )}
+
+              <p className="field-hint">
+                {hasShape
+                  ? "The figures below are for the drawn area. Delete it to go back to the whole district."
+                  : "With nothing drawn, the figures are for the whole district."}
+              </p>
 
               {error && <p className="message" style={{ marginTop: 14 }}>{error}</p>}
               {busy && <p className="note" style={{ marginTop: 14 }}>Measuring...</p>}
@@ -382,7 +393,7 @@ export default function AreaAnalysis() {
                         <p className="note" style={{ marginTop: 8 }}>{environment.heat.note}</p>
                       </>
                     ) : (
-                      <p className="note">No temperature layer for this district yet.</p>
+                      <p className="note">No temperature data for this district.</p>
                     )}
                   </PanelSection>
 
