@@ -167,11 +167,20 @@
   width: 72%;
 }
 
+/* Three screens tall. The stage inside stays put while the page scrolls
+   through it, and why, what and how take their turn. */
 .landing-sage {
+  height: 300vh;
+  background: var(--sage);
+}
+
+.sage-stage {
+  position: sticky;
+  top: 0;
   display: flex;
   flex-direction: column;
+  height: 100vh;
   padding: 26px var(--page-x) 60px;
-  background: var(--sage);
 }
 
 .landing-sage .wordmark {
@@ -195,6 +204,34 @@
   line-height: 1;
   text-transform: uppercase;
   color: var(--slate);
+}
+
+/* The one being answered is darker and larger; the others stand back. */
+.sage-words span {
+  opacity: 0.4;
+  transform-origin: left center;
+  transition: opacity 0.4s ease, transform 0.4s ease, color 0.4s ease;
+}
+
+.sage-words span.is-active {
+  opacity: 1;
+  color: #1a1a1a;
+  transform: scale(1.3);
+}
+
+.sage-step {
+  /* Room for the longest of the three, so the button below does not jump. */
+  min-height: 7.5em;
+  font-size: clamp(16px, 1.5vw, 22px);
+  line-height: 1.45;
+  animation: sage-step-in 0.5s ease both;
+}
+
+@keyframes sage-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
 }
 
 .sage-display {
@@ -264,6 +301,37 @@
   font-size: 18px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.team-name {
+  margin: -16px 0 24px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sage);
+}
+
+.person-icons {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.person a.person-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-top: 0;
+  border: 1px solid var(--line-on-dark);
+  border-radius: 50%;
+  color: var(--sage-soft);
+}
+
+.person a.person-icon:hover {
+  background: var(--forest-800);
+  color: var(--ivory);
 }
 
 .person-role {
