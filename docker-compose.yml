@@ -1,0 +1,67 @@
+# Shuhul on one machine: database, API, worker and website.
+#
+#   cp deploy/env.example .env     and fill it in
+#   docker compose up -d --build
+#
+# The processed data folder is mounted from the host (SHUHUL_DATA_DIR).
+
+x-app: &app
+  build: .
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    SHUHUL_ENV: production
+    SHUHUL_DATABASE_URL: postgresql+psycopg2://shuhul:${POSTGRES_PASSWORD}@db:5432/shuhul
+  volumes:
+    - ${SHUHUL_DATA_DIR:-./processed}:/data/processed:ro
+    - outputs:/data/outputs
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shuhul
+      POSTGRES_USER: shuhul
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shuhul -d shuhul"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    <<: *app
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # Runs queued analyses and re-reads the news outlets every few hours.
+  worker:
+    <<: *app
+    command: ["python", "-m", "backend.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  db:
+  outputs:

@@ -1,0 +1,16 @@
+# Keep images small and data out of them.
+.git
+rawdata
+processed
+outputs
+**/__pycache__
+**/*.pyc
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/.env
+backend/.dev_secret_key
+backend/.dev_test_account
+backend/scripts/notinuse
+frontend/node_modules
+frontend/dist

@@ -1,0 +1,18 @@
+# Plain HTTP on port 80. HTTPS ends at CloudFront, in front of this.
+:80 {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		root * /srv/site
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Built files carry a hash in their name, so they can be kept for a year.
+	@hashed path /assets/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+}
