@@ -3,6 +3,7 @@
 from pathlib import Path
 import argparse
 import json
+import os
 
 import geopandas as gpd
 import numpy as np
@@ -18,9 +19,12 @@ from pyproj import Transformer
 
 ROOT = Path(__file__).resolve().parents[2]
 
-PROCESSED = ROOT / "processed"
-ROUTES_DIR = ROOT / "outputs" / "routes"
-OUTPUT_DIR = ROOT / "outputs" / "impacts"
+# The data and output folders can live away from the code, as they do on
+# a server. The same settings the API reads decide where.
+PROCESSED = Path(os.getenv("SHUHUL_PROCESSED_ROOT", ROOT / "processed"))
+OUTPUTS = Path(os.getenv("SHUHUL_OUTPUT_ROOT", ROOT / "outputs"))
+ROUTES_DIR = OUTPUTS / "routes"
+OUTPUT_DIR = OUTPUTS / "impacts"
 
 
 # ============================================================
