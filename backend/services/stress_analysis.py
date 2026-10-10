@@ -72,7 +72,11 @@ MAIN_ROADS = {
 
 # WorldCover classes where planting is not the answer: open water and wetland.
 WATER_CLASSES = (80, 90)
+BUILT_CLASS = 50
 MOSTLY_WATER_PCT = 50.0
+
+# Flood index at or above this is the high and very high classes.
+FLOOD_PRONE_FROM = 0.65
 
 # Greening priority: (zone property, weight, True when a high value raises
 # priority, what it means in a planner's words).
@@ -214,16 +218,24 @@ def main_road_grid(path, shape, transform, crs):
         return np.full(shape, np.nan, dtype="float32")
 
 
-def water_grid(landcover_path, water_path, shape, transform, crs):
+def class_grid(path, shape, transform, crs):
+    """Land cover classes on the district grid, or None without the layer."""
+    if path is None:
+        return None
+
+    with rasterio.open(path) as src:
+        with WarpedVRT(
+            src, crs=crs, transform=transform,
+            width=shape[1], height=shape[0],
+            resampling=Resampling.nearest,
+        ) as vrt:
+            return vrt.read(1)
+
+
+def water_grid(classes, water_path, shape, transform, crs):
     """1 where the land is open water or wetland."""
-    if landcover_path is not None:
-        with rasterio.open(landcover_path) as src:
-            with WarpedVRT(
-                src, crs=crs, transform=transform,
-                width=shape[1], height=shape[0],
-                resampling=Resampling.nearest,
-            ) as vrt:
-                return np.isin(vrt.read(1), WATER_CLASSES).astype("float32")
+    if classes is not None:
+        return np.isin(classes, WATER_CLASSES).astype("float32")
 
     if water_path is not None:
         water = read_aligned(water_path, shape, transform, crs)
@@ -418,10 +430,21 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
     main_roads = main_road_grid(
         roads_path if roads_path.exists() else None, shape, transform, crs
     )
-    water = water_grid(
-        find_raster(directory, "landcover"), find_raster(directory, "water"),
-        shape, transform, crs,
-    )
+    classes = class_grid(find_raster(directory, "landcover"), shape, transform, crs)
+    water = water_grid(classes, find_raster(directory, "water"), shape, transform, crs)
+
+    # Layers that say what building on a zone would cost. Each is optional.
+    def optional(name):
+        path = find_raster(directory, name)
+        return read_aligned(path, shape, transform, crs) if path else None
+
+    flood = optional("flood")
+    slope = optional("slope")
+    sensitivity = optional("heat_sensitivity")
+    any_road = optional("roads")
+    heritage = optional("heritage")
+    forest = optional("forest")
+    cell_ha = abs(float(transform.a) * float(transform.e)) / 10_000.0
 
     base_valid = finite(ndvi) & finite(ndwi)
 
@@ -521,6 +544,25 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
 
             road_share = mean_in(main_roads)
             water_share = mean_in(water)
+
+            def share_in(arr, test):
+                """Percent of the zone's cells that pass a test, or None without the layer."""
+                if arr is None:
+                    return None
+                vals = arr[row0:row1, col0:col1]
+                usable = vals[valid & np.isfinite(vals)]
+                return round(float(test(usable).mean()) * 100, 2) if usable.size else None
+
+            # Open land: not water, not built-up, not under trees.
+            open_ha = None
+            if classes is not None and np.isfinite(canopy_vals).any():
+                block = classes[row0:row1, col0:col1]
+                open_cells = (
+                    valid
+                    & ~np.isin(block, WATER_CLASSES + (BUILT_CLASS,))
+                    & (np.nan_to_num(canopy_vals, nan=1.0) == 0)
+                )
+                open_ha = round(float(open_cells.sum()) * cell_ha, 2)
             sites = sites_by_zone.get((row0 // step_y, col0 // step_x), {})
 
             polygon = zone_polygon(row0, row1, col0, col1, transform, crs)
@@ -543,6 +585,17 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
                     "mean_lst": round(mean_in(lst), 2) if lst_available else None,
                     "main_road_pct": round(road_share * 100, 2) if road_share is not None else None,
                     "water_pct": round(water_share * 100, 2) if water_share is not None else None,
+                    "zone_ha": round(float(valid.sum()) * cell_ha, 2),
+                    "open_land_ha": open_ha,
+                    "flood_prone_pct": share_in(flood, lambda v: v >= FLOOD_PRONE_FROM),
+                    "mean_slope_deg": round(mean_in(slope), 2) if slope is not None and mean_in(slope) is not None else None,
+                    "warming_if_paved_c": (
+                        round(mean_in(sensitivity), 2)
+                        if sensitivity is not None and mean_in(sensitivity) is not None else None
+                    ),
+                    "road_pct": share_in(any_road, lambda v: v > 0.5),
+                    "heritage_pct": share_in(heritage, lambda v: v > 0.5),
+                    "forest_pct": share_in(forest, lambda v: v > 0.5),
                     "education_buildings": sites.get("education", 0),
                     "health_buildings": sites.get("health", 0),
                     "sensitive_names": sites.get("names", [])[:MAX_SITE_NAMES],
@@ -550,7 +603,7 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
             })
             zone_number += 1
 
-    # The older canopy layer carries a height on every vegetated cell, so
+    # The plain canopy height layer carries a height on every vegetated cell, so
     # only the tree cover layer can say where trees are missing.
     tree_cover_known = canopy_path is not None and canopy_path.stem == "tree_height"
     zones_ranked = add_greening_priority(features) if tree_cover_known else 0
@@ -576,7 +629,7 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
             "available": bool(zones_ranked),
             "unavailable_reason": (
                 None if zones_ranked
-                else "Tree cover has not been mapped for this district yet."
+                else "No tree cover data for this district."
             ),
             "zones_ranked": zones_ranked,
             "weights": {key: factor[1] for key, factor in GREENING_FACTORS.items()},
@@ -622,6 +675,11 @@ def cached_stress(district):
             find_raster(directory, "lst", "land_surface_temperature"),
             find_raster(directory, "buildings"),
             find_raster(directory, "landcover"),
+            find_raster(directory, "flood"),
+            find_raster(directory, "heat_sensitivity"),
+            find_raster(directory, "forest"),
+            find_raster(directory, "heritage"),
+            find_raster(directory, "roads"),
             find_buildings(directory),
             directory / "roads.gpkg" if (directory / "roads.gpkg").exists() else None,
             Path(__file__),

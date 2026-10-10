@@ -18,6 +18,7 @@ const ITEMS: NavItem[] = [
     children: [
       { label: "Area analysis", path: "environment/area", hint: "Measure any area or district" },
       { label: "Ecological stress", path: "environment/stress", hint: "Where pressure is highest, and why" },
+      { label: "Where to build", path: "environment/sites", hint: "Land that would cost the least to build on" },
       { label: "Air and temperature", path: "environment/air", hint: "Today and the past year" },
     ],
   },
