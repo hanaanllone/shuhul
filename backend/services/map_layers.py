@@ -272,14 +272,54 @@ def _render_combined_water_png(water_path, ndwi_path, max_dim=1600, threshold=0.
     return buffer, bounds
 
 
+DISTRICT_NAMES = {
+    "ant": "Anantnag",
+    "bdg": "Budgam",
+    "bnd": "Bandipora",
+    "gnd": "Ganderbal",
+    "klgm": "Kulgam",
+    "kpwr": "Kupwara",
+    "plwoam": "Pulwama",
+    "shpyn": "Shopian",
+    "sxr": "Srinagar",
+    "sr-c": "Srinagar city",
+    "var": "Baramulla",
+}
+
+
+def list_districts():
+    """Districts that have processed data, with what each one offers."""
+    districts = []
+
+    for code, name in DISTRICT_NAMES.items():
+        folder = PROCESSED_ROOT / code
+        if not (folder / "ndvi.tif").exists():
+            continue
+
+        districts.append({
+            "code": code,
+            "name": name,
+            "has_tiles": (folder / "tiles" / "manifest.json").exists(),
+            "has_heat": (folder / "lst.tif").exists(),
+        })
+
+    # The districts with the full layer set come first.
+    return sorted(districts, key=lambda item: (not item["has_tiles"], item["name"]))
+
+
 def register_map_layer_routes(app):
     """
     Register:
+      GET /api/districts
       GET /api/layers/<district>/manifest
       GET /api/tiles/<district>/<layer>/<z>/<x>/<y>.png
       GET /api/layers/<district>/<layer>.png
       GET /api/layers/<district>/buildings
     """
+
+    @app.get("/api/districts")
+    def districts():
+        return jsonify({"districts": list_districts()})
 
     @app.get("/api/layers/<district>/manifest")
     def map_layer_manifest(district):

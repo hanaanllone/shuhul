@@ -754,6 +754,39 @@ def load_result_geojson(output_dir, construction):
         return None
     return _read_json_file(route_path)
 
+PREVIEW_MAX_POINTS = 60
+
+
+def build_preview(payload, route_geojson):
+    """
+    A small outline of the project for its card on the home page: the
+    two endpoints and each route thinned to a few dozen points.
+    """
+    routes = []
+
+    for feature in (route_geojson or {}).get("features", []):
+        geometry = feature.get("geometry") or {}
+        if geometry.get("type") != "LineString":
+            continue
+
+        coordinates = geometry["coordinates"]
+        step = max(1, len(coordinates) // PREVIEW_MAX_POINTS)
+        thinned = coordinates[::step]
+        if thinned[-1] != coordinates[-1]:
+            thinned.append(coordinates[-1])
+
+        routes.append({
+            "name": feature.get("properties", {}).get("route"),
+            "points": [[round(lat, 5), round(lng, 5)] for lng, lat in thinned],
+        })
+
+    return {
+        "start": payload.get("start"),
+        "end": payload.get("end"),
+        "routes": routes,
+    }
+
+
 def run_project(project_id, payload):
     output_dir = None
 
@@ -898,6 +931,7 @@ def run_project(project_id, payload):
             stage="Analysis, mitigation and report complete",
             progress=100,
             result_json=result,
+            preview_json=build_preview(payload, route_geojson),
         )
 
     except Exception as exc:

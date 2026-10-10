@@ -13,7 +13,9 @@ from sqlalchemy import (
     event,
     func,
     insert,
+    inspect,
     select,
+    text,
     update,
 )
 
@@ -63,6 +65,7 @@ projects = Table(
     Column("stage", Text, nullable=False, default="queued"),
     Column("progress", Integer, nullable=False, default=0),
     Column("result_json", Text),
+    Column("preview_json", Text),
     Column("error", Text),
     Column("created_at", String(32), nullable=False),
     Column("updated_at", String(32), nullable=False),
@@ -117,6 +120,16 @@ def _now():
 
 def init_db():
     metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns():
+    """Bring a database created by an earlier version up to date."""
+    existing = {column["name"] for column in inspect(engine).get_columns("projects")}
+
+    if "preview_json" not in existing:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE projects ADD COLUMN preview_json TEXT"))
 
 
 # ------------------------------------------------------------
@@ -180,13 +193,13 @@ def create_project(project_id, user_id, project_name, payload):
 
 
 def update_project(project_id, **fields):
-    allowed = {"status", "stage", "progress", "result_json", "error"}
+    allowed = {"status", "stage", "progress", "result_json", "preview_json", "error"}
     values = {}
 
     for key, value in fields.items():
         if key not in allowed:
             continue
-        if key == "result_json" and not isinstance(value, str):
+        if key in ("result_json", "preview_json") and not isinstance(value, str):
             value = json.dumps(value)
         values[key] = value
 
@@ -212,6 +225,7 @@ def get_project(project_id, user_id):
 
     item = dict(row)
     item["payload"] = json.loads(item.pop("payload_json"))
+    item.pop("preview_json", None)
     result_json = item.pop("result_json", None)
     if result_json:
         item["result"] = json.loads(result_json)
@@ -230,11 +244,29 @@ def list_projects(user_id):
                 projects.c.error,
                 projects.c.created_at,
                 projects.c.updated_at,
+                projects.c.payload_json,
+                projects.c.preview_json,
             )
             .where(projects.c.user_id == user_id)
             .order_by(projects.c.created_at.desc())
         ).mappings().all()
-    return [dict(row) for row in rows]
+
+    items = []
+    for row in rows:
+        item = dict(row)
+        payload = json.loads(item.pop("payload_json"))
+        preview = item.pop("preview_json")
+
+        # What the project card draws: the routes once they exist, and
+        # until then just the two endpoints the planner picked.
+        item["preview"] = json.loads(preview) if preview else {
+            "start": payload.get("start"),
+            "end": payload.get("end"),
+            "routes": [],
+        }
+        item["construction_type"] = payload.get("constructionType")
+        items.append(item)
+    return items
 
 
 def count_active_projects(user_id):
