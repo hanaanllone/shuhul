@@ -54,6 +54,10 @@ SURFACE_FEATURES = [
 # A green roof changes how green the roof is, not what the cell is.
 GREEN_ROOF_FEATURES = ["ndvi"]
 
+# Planting goes on open land: it replaces grass, crops and bare ground and
+# leaves buildings, water and standing trees as they are.
+PLANTING = {"tree", "shrub", "crop"}
+
 
 class ThermalUnavailable(Exception):
     """No fitted thermal model covers the requested place."""
@@ -159,8 +163,64 @@ def _predict(model, summary, features):
     return model.predict(X).reshape(shape).astype("float32")
 
 
+def _open_land(features):
+    """Share of each cell that is not built, not water and not under trees."""
+    trees = np.maximum(features["tree_share"], features["canopy_share"])
+    taken = features["built_share"] + features["water_share"] + trees
+    return np.clip(1.0 - np.nan_to_num(taken, nan=1.0), 0.0, 1.0)
+
+
+def _unbuilt_land(features):
+    """Share of each cell that is neither built nor water."""
+    taken = features["built_share"] + features["water_share"]
+    return np.clip(1.0 - np.nan_to_num(taken, nan=1.0), 0.0, 1.0)
+
+
+def _shrink(pool, share):
+    """What is left of the covers in a pool after `share` of the cell is taken from it."""
+    return np.where(pool > 0, 1.0 - share / np.maximum(pool, 1e-6), 1.0)
+
+
+def _plant(changed, target, share):
+    """Turn `share` of each cell from open land into a planted surface."""
+    left = _shrink(_open_land(changed), share)
+
+    changed["grass_share"] = changed["grass_share"] * left + share * target["grass_share"]
+    changed["crop_share"] = changed["crop_share"] * left + share * target["crop_share"]
+    changed["tree_share"] = changed["tree_share"] + share * target["tree_share"]
+    changed["canopy_share"] = np.clip(
+        changed["canopy_share"] + share * target["canopy_share"], 0.0, 1.0
+    )
+    changed["canopy_height"] = changed["canopy_height"] + share * target["canopy_height"]
+    changed["ndvi"] = (1 - share) * changed["ndvi"] + share * target["ndvi"]
+
+
+def _develop(changed, target, share):
+    """Turn `share` of each cell from unbuilt land into a paved or built surface."""
+    left = _shrink(_unbuilt_land(changed), share)
+
+    for name in ("tree_share", "canopy_share", "canopy_height", "grass_share", "crop_share"):
+        changed[name] = changed[name] * left
+
+    changed["built_share"] = np.clip(
+        changed["built_share"] + share * target["built_share"], 0.0, 1.0
+    )
+    changed["roof_share"] = np.clip(
+        changed["roof_share"] + share * target["roof_share"], 0.0, 1.0
+    )
+    changed["ndvi"] = (1 - share) * changed["ndvi"] + share * target["ndvi"]
+
+
 def _apply(features, summary, changes, transform):
-    """Return a copy of the features with the changes painted in."""
+    """
+    Return a copy of the features with the changes painted in.
+
+    A change is (geometry, surface), (geometry, surface, share) or
+    (geometry, surface, share, True). The share is how much of the land
+    inside the geometry changes. With the final True it is a share of the
+    land that can take the change (open land for planting, roofs for green
+    roofs, unbuilt land for construction) instead of a share of all of it.
+    """
     shape = features["ndvi"].shape
     changed = {name: array.copy() for name, array in features.items()}
     typical = summary["typical_surfaces"]
@@ -168,16 +228,31 @@ def _apply(features, summary, changes, transform):
     for change in changes:
         geometry, surface = change[0], change[1]
         intensity = change[2] if len(change) > 2 else 1.0
+        of_room = len(change) > 3 and bool(change[3])
 
         if surface not in typical:
             raise ValueError(f"Unknown surface type: {surface}")
 
+        target = typical[surface]
         share = _coverage(geometry, shape, transform) * intensity
-        names = GREEN_ROOF_FEATURES if surface == "green_roof" else SURFACE_FEATURES
 
-        for name in names:
-            target = typical[surface][name]
-            changed[name] = (1 - share) * changed[name] + share * target
+        if surface in PLANTING:
+            room = _open_land(changed)
+            _plant(changed, target, share * room if of_room else np.minimum(share, room))
+
+        elif surface == "green_roof":
+            if of_room:
+                share = share * np.nan_to_num(changed["roof_share"], nan=0.0)
+            for name in GREEN_ROOF_FEATURES:
+                changed[name] = (1 - share) * changed[name] + share * target[name]
+
+        elif of_room:
+            _develop(changed, target, share * _unbuilt_land(changed))
+
+        else:
+            # Construction along a corridor replaces whatever is there.
+            for name in SURFACE_FEATURES:
+                changed[name] = (1 - share) * changed[name] + share * target[name]
 
     for name, (source, cells) in summary["neighbourhood"].items():
         changed[name] = _neighbourhood_mean(changed[source], int(cells))
@@ -222,6 +297,7 @@ def run_scenarios(scenarios, district=None, focus=None):
 
     scenarios: {name: [(geometry, surface) or (geometry, surface, share), ...]}
                with geometries in the district's projected CRS (EPSG:32643).
+               See _apply for what the share means.
     focus:     geometry whose surroundings are reported on. Defaults to
                everything any scenario touches.
 
