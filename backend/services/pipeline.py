@@ -281,8 +281,6 @@ def run_cost_surface(district, payload, output_dir):
         ) / 100,
         hard_heritage=bool(hard.get("heritage")),
         hard_water=bool(hard.get("water")),
-        hard_lakes=bool(hard.get("lakes")),
-        hard_rivers=bool(hard.get("rivers")),
         hard_forest=bool(hard.get("forest")),
         heat_priority=float(
             prefs.get("heatPriority", 50)
@@ -372,6 +370,9 @@ def run_impact_analysis(district, payload, output_dir):
 
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
+
+    # The analyzer reads the district layers from the configured data folder.
+    module.PROCESSED = Path(PROCESSED_ROOT)
 
     required_functions = [
         "load_routes",
@@ -941,10 +942,17 @@ def run_project(project_id, payload):
         # The router's own wording means nothing to a planner.
         if "no minimum-cost path" in message:
             message = (
-                "No route is possible within these limits. The two points are cut off "
-                "from each other by land that must never be built on, such as a river. "
-                "Lift a limit or move a point."
+                "No route is possible within these limits. Land marked as never to be "
+                "built on lies between the two points with no way around it. Untick a "
+                "limit under Never build on, or move a point."
             )
+        elif "lies inside a hard constraint" in message:
+            message = (
+                "One of the points sits on land marked as never to be built on. "
+                "Move it, or untick that limit under Never build on."
+            )
+        elif "outside the valid planning area" in message or "outside the raster" in message:
+            message = "One of the points is outside the district's data. Move it inside."
 
         update_project(
             project_id,

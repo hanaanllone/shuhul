@@ -25,8 +25,7 @@ export const DEFAULT_FORM: PlannerForm = {
   },
   constraints: {
     heritage: false,
-    lakes: false,
-    rivers: false,
+    water: false,
     forest: false,
     flood: false,
     steepSlope: false,
@@ -45,8 +44,7 @@ const PRIORITIES: [string, string][] = [
 
 const CONSTRAINTS: [string, string, string][] = [
   ["heritage", "Heritage sites", "Stay 100 m clear of mapped heritage points"],
-  ["lakes", "Lakes and wetlands", "Never build across a lake, pond or wetland"],
-  ["rivers", "Rivers and canals", "Never cross one. Only works when both points are on the same bank"],
+  ["water", "Water bodies", "Never cross rivers, lakes or ponds. Points on opposite banks cannot be joined"],
   ["forest", "Hill forest", "Dense tree cover on slopes"],
   ["flood", "Recorded flood land", "Land where water has been recorded since 1984"],
   ["steepSlope", "Very steep terrain", "Slopes of 30 degrees or more"],

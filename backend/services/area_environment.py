@@ -241,16 +241,12 @@ def summarise(district, geometry=None):
             "note": "Screening index. Flood-prone means the high and very high classes.",
         }
 
-    # Water today: the satellite index joined with mapped lakes, wetlands and rivers.
+    # Water today, from the district water layer.
     water_now, _ = _values(folder / "water.tif", area)
-    mapped = (folder / "water_lakes.tif").exists()
     if water_now is not None and water_now.size:
         result["water_now"] = {
             "cover_pct": round(100 * float((water_now > 0).mean()), 1),
-            "source": (
-                "Satellite water index joined with mapped lakes, wetlands and rivers"
-                if mapped else "Satellite water index"
-            ),
+            "source": "Satellite water index",
         }
 
     lost, lost_cell = _values(folder / "water_lost.tif", area)

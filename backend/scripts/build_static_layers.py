@@ -2,7 +2,6 @@ from pathlib import Path
 import argparse
 import gzip
 import json
-import shutil
 import warnings
 
 import geopandas as gpd
@@ -219,79 +218,6 @@ def burn(geometries, grid, all_touched):
         dtype="uint8",
         all_touched=all_touched,
     )
-
-
-# ------------------------------------------------------------
-# LAKES AND RIVERS
-# ------------------------------------------------------------
-
-# Half the width given to a river or canal that is mapped only as a line, m.
-OSM_LINE_HALF_WIDTH_M = {"river": 10.0, "canal": 5.0}
-
-
-def build_water_bodies(district, grid, valid):
-    """
-    Lakes, wetlands and rivers from OpenStreetMap, and a water layer that
-    joins them to the satellite water index.
-
-    The index misses the parts of a lake that are under weed or algae and
-    reads them as land. A mapped lake outline does not.
-    """
-    log("\nLakes and rivers")
-
-    source = RAW_ROOT / "osm" / f"{district}_water.gpkg"
-    if not source.exists():
-        log("  OpenStreetMap water not fetched; skipping (fetch_open_data.py --what osm_water)")
-        return None
-
-    frame = gpd.read_file(source)
-    if frame.empty:
-        log("  nothing mapped here")
-        return None
-
-    frame = frame.to_crs(grid["crs"])
-    frame = frame[frame.geometry.notna() & ~frame.geometry.is_empty]
-
-    # A river mapped as a line gets a nominal width.
-    is_line = frame["line"].notna()
-    frame.loc[is_line, "geometry"] = frame[is_line].apply(
-        lambda row: row.geometry.buffer(OSM_LINE_HALF_WIDTH_M.get(row["line"], 5.0)), axis=1
-    )
-    frame = frame[frame.geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
-    frame["geometry"] = frame.geometry.buffer(0)
-    frame = frame[~frame.geometry.is_empty]
-
-    frame.drop(columns="line").to_file(PROCESSED_ROOT / district / "water_osm.gpkg", driver="GPKG")
-
-    standing = burn(frame[frame["kind"].isin(["lake", "wetland"])].geometry, grid, all_touched=False)
-    flowing = burn(frame[frame["kind"] == "river"].geometry, grid, all_touched=True)
-    # Where a river runs through a lake outline, it is the lake.
-    flowing[standing > 0] = 0
-
-    write_grid(PROCESSED_ROOT / district / "water_lakes.tif", masked(standing, valid, 255), grid, "uint8", 255)
-    write_grid(PROCESSED_ROOT / district / "water_rivers.tif", masked(flowing, valid, 255), grid, "uint8", 255)
-
-    # The water layer everything else reads: the satellite index, kept
-    # aside under its own name the first time, joined with mapped water.
-    water_path = PROCESSED_ROOT / district / "water.tif"
-    index_path = PROCESSED_ROOT / district / "water_ndwi.tif"
-    if not index_path.exists():
-        shutil.copyfile(water_path, index_path)
-
-    seen = np.nan_to_num(read_master(district, "water_ndwi"), nan=0.0) > 0
-    joined = seen | (standing > 0) | (flowing > 0)
-    write_grid(water_path, masked(joined.astype("uint8"), valid, 255), grid, "uint8", 255)
-
-    cell_km2 = grid["resolution"] ** 2 / 1e6
-    area = lambda cells: round(float((cells & valid).sum()) * cell_km2, 2)
-    return {
-        "mapped_features": int(len(frame)),
-        "lakes_and_wetlands_km2": area(standing > 0),
-        "rivers_km2": area(flowing > 0),
-        "seen_by_satellite_km2": area(seen),
-        "mapped_but_not_seen_km2": area(((standing > 0) | (flowing > 0)) & ~seen),
-        "water_km2": area(joined),
-    }
 
 
 # ------------------------------------------------------------
@@ -598,50 +524,22 @@ def build(district):
     summary["heritage"] = build_heritage(district, grid, valid)
     summary["forest"] = build_forest(district, grid, valid, trees)
 
-    build_water(district, grid, valid, summary)
+    occurrence, lost, summary["water_history"] = build_water_history(district, grid, valid)
+    summary["flood"] = build_flood(district, grid, valid, occurrence, lost)
 
     path = PROCESSED_ROOT / district / "static_layers.json"
     path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     log(json.dumps(summary, indent=2))
 
 
-def build_water(district, grid, valid, summary):
-    """Everything that follows from where the water is: bodies, history, flood."""
-    bodies = build_water_bodies(district, grid, valid)
-    if bodies is not None:
-        summary["water_bodies"] = bodies
-
-    occurrence, lost, summary["water_history"] = build_water_history(district, grid, valid)
-    summary["flood"] = build_flood(district, grid, valid, occurrence, lost)
-
-
-def build_water_only(district):
-    """Rebuild the water layers and keep the rest of the summary as it is."""
-    grid, valid = master_grid(district)
-    path = PROCESSED_ROOT / district / "static_layers.json"
-    summary = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"district": district}
-
-    build_water(district, grid, valid, summary)
-
-    path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    log(json.dumps({key: summary[key] for key in ("water_bodies", "water_history", "flood") if key in summary}, indent=2))
-
-
 def main():
     parser = argparse.ArgumentParser(description="Build static district layers.")
     parser.add_argument("--district", default="sxr")
-    parser.add_argument(
-        "--only", choices=["water"],
-        help="Rebuild just the water layers: lakes, rivers, water history and flood.",
-    )
     args = parser.parse_args()
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        if args.only == "water":
-            build_water_only(args.district)
-        else:
-            build(args.district)
+        build(args.district)
 
 
 if __name__ == "__main__":

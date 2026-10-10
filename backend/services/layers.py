@@ -144,34 +144,9 @@ LAYERS = {
         "file": "water.tif",
         "kind": "mask",
         "color": "#2a78c8",
-        "source": "Satellite water index joined with lakes, wetlands and rivers mapped on OpenStreetMap",
+        "source": "Processed water layer",
         "resolution_m": 10,
         "confidence": "High",
-    },
-    "water_lakes": {
-        "title": "Lakes and wetlands",
-        "group": "Water",
-        "file": "water_lakes.tif",
-        "kind": "mask",
-        "color": "#1f4e8c",
-        "source": "OpenStreetMap contributors",
-        "resolution_m": 10,
-        "confidence": "Medium",
-        "note": (
-            "Mapped outlines, so the parts of a lake under weed or algae count as lake. "
-            "A satellite water index reads those as land."
-        ),
-    },
-    "water_rivers": {
-        "title": "Rivers and canals",
-        "group": "Water",
-        "file": "water_rivers.tif",
-        "kind": "mask",
-        "color": "#35a0c9",
-        "source": "OpenStreetMap contributors",
-        "resolution_m": 10,
-        "confidence": "Medium",
-        "note": "A river mapped only as a line is given a nominal width of 20 m, a canal 10 m.",
     },
     "water_occurrence": {
         "title": "Water history",

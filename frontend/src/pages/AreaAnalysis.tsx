@@ -425,7 +425,7 @@ export default function AreaAnalysis() {
                   <PanelSection heading="Water and flood">
                     <div className="stat-grid">
                       <Stat
-                        label="Water and wetland"
+                        label="Water"
                         value={`${num(environment.water_now?.cover_pct ?? legacy?.water_cover?.percentage, 1)}%`}
                         note={environment.water_now?.source || "Satellite water index"}
                       />

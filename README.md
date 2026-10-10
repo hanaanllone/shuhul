@@ -77,7 +77,6 @@ height.
 | Land cover | ESA WorldCover 2021 | 10 m |
 | Tree canopy | Canopy height, kept where WorldCover also shows trees | 10 m |
 | Water history, lost water | JRC Global Surface Water, 1984 to 2021 | 30 m |
-| Lakes, wetlands, rivers | OpenStreetMap, Geofabrik extract | vector |
 | Buildings | Microsoft detected footprints, OpenStreetMap named buildings | vector |
 | Roads, heritage points | OpenStreetMap | vector |
 | Weather | Open-Meteo: ERA5 reanalysis and forecast model | about 10 to 25 km |
@@ -97,10 +96,6 @@ Everything is put on one 10 m grid per district (UTM zone 43N).
   3 km blocks it never saw, its typical error is 2.33 °C (root mean square)
   and it explains 88% of the variation. A change of surface is simulated by
   changing a cell's inputs and predicting again.
-- **Water** joins two sources. A satellite water index misses the parts of a
-  lake that are under weed or algae and reads them as land, so mapped lake,
-  wetland and river outlines are added to it. Lakes and rivers can each be
-  set as land a route must never cross.
 - **Flood** is a screening index from recorded water, low ground, height
   above the nearest water and flatness. It is not a hydraulic model.
 - **Stress and greening priority** compare zones inside one district. They

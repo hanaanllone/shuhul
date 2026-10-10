@@ -9,7 +9,6 @@ const SOURCES: [string, string][] = [
   ["Vegetation and water indices", "Sentinel-2 composites"],
   ["Land cover", "ESA WorldCover 2021"],
   ["Water history and lost water", "JRC Global Surface Water, 1984 to 2021"],
-  ["Lakes and rivers", "OpenStreetMap contributors"],
   ["Detected buildings", "Microsoft building footprints"],
   ["Named buildings, roads and heritage", "OpenStreetMap contributors"],
   ["Air and weather", "Open-Meteo: CAMS air quality model and ERA5 reanalysis"],
