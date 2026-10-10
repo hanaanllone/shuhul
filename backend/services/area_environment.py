@@ -7,6 +7,11 @@ water history, and how vegetation, built-up cover and surface
 temperature have moved year by year.
 
     POST /api/area/environment   {"district": "sxr", "geometry": <GeoJSON, optional>}
+
+It also answers "what if": how the surface temperature of a drawn area
+would move if part of it were planted, given green roofs, paved or built on.
+
+    POST /api/area/what-if       {"district", "geometry", "change", "share"}
 """
 
 from pathlib import Path
@@ -18,6 +23,7 @@ from rasterio.mask import mask
 from shapely.geometry import shape
 
 from ..config import PROCESSED_ROOT, PROJECT_ROOT
+from . import thermal
 
 LANDCOVER_NAMES = {
     10: "Tree cover",
@@ -40,6 +46,27 @@ YEARLY = {
     "ndbi": "Built-up index",
     "lst_rel": "Temperature against the valley floor, °C",
 }
+
+
+# Changes a planner can try on a drawn area: the surface the thermal model
+# paints in, and the kind of land that could take it.
+WHAT_IFS = {
+    "trees": {"label": "Plant trees", "surface": "tree", "land": "open"},
+    "shrubs": {"label": "Plant shrubs and grass", "surface": "shrub", "land": "open"},
+    "green_roofs": {"label": "Green the roofs", "surface": "green_roof", "land": "roofs"},
+    "pave": {"label": "Pave it", "surface": "road", "land": "unbuilt"},
+    "build": {"label": "Build on it", "surface": "built", "land": "unbuilt"},
+}
+
+LAND_NAMES = {
+    "open": "open land: not water, not built-up and not already under trees",
+    "roofs": "roofs",
+    "unbuilt": "land that is not water and not already built-up",
+}
+
+WHAT_IF_MAX_KM2 = 25.0
+WATER_CODES = (80, 90)
+BUILT_CODE = 50
 
 
 class AreaError(Exception):
@@ -233,9 +260,126 @@ def summarise(district, geometry=None):
     return result
 
 
+def _land_shares(folder, area):
+    """How much of the area each kind of land takes up, 0 to 1."""
+    landcover, _ = _values(folder / "landcover.tif", area)
+    trees, _ = _values(folder / "tree_height.tif", area)
+    roofs, _ = _values(folder / "buildings.tif", area)
+
+    if landcover is None or not landcover.size or trees is None or roofs is None:
+        raise AreaError("This district does not have the land cover needed for a what-if.")
+
+    water = float(np.isin(landcover, WATER_CODES).mean())
+    built = float((landcover == BUILT_CODE).mean())
+    canopy = float((trees > 0).mean()) if trees.size else 0.0
+    roof = float(roofs.mean()) if roofs.size else 0.0
+
+    return {
+        "open": max(0.0, 1.0 - water - built - canopy),
+        "roofs": min(1.0, roof),
+        "unbuilt": max(0.0, 1.0 - water - built),
+    }
+
+
+def what_if(district, geometry, change, share):
+    """
+    Estimate how a change to part of a drawn area moves its surface
+    temperature. `share` is how much of the land that could take the
+    change actually gets it, 0 to 1.
+    """
+    if change not in WHAT_IFS:
+        raise AreaError(f"Unknown change: {change}")
+    if not geometry:
+        raise AreaError("Draw an area first.")
+
+    folder = Path(PROCESSED_ROOT) / district
+    master = folder / "ndvi.tif"
+    if not master.exists():
+        raise AreaError(f"No data for district: {district}")
+
+    with rasterio.open(master) as src:
+        crs = src.crs
+
+    area = _area_shape(district, geometry, crs)
+    if area.area / 1e6 > WHAT_IF_MAX_KM2:
+        raise AreaError(f"Draw an area of {WHAT_IF_MAX_KM2:.0f} km² or less for a what-if.")
+
+    option = WHAT_IFS[change]
+    share = min(1.0, max(0.0, float(share)))
+    available = _land_shares(folder, area)[option["land"]]
+
+    if share <= 0 or available <= 0:
+        raise AreaError(f"This area has no {LAND_NAMES[option['land']].split(':')[0]} to change.")
+
+    try:
+        # The share is of the land that can take the change, cell by cell.
+        result = thermal.run_scenarios(
+            {"change": [(area, option["surface"], share, True)]},
+            district=district,
+            focus=area,
+        )
+    except thermal.ThermalUnavailable as exc:
+        raise AreaError(str(exc)) from exc
+
+    def picked(zone):
+        before, after = result["scenarios"]["existing"][zone], result["scenarios"]["change"][zone]
+        if before is None or after is None:
+            return None
+        return {
+            "area_ha": after["area_ha"],
+            "now_c": before["observed_lst_c"],
+            "after_c": after["estimated_lst_c"],
+            "change_c": after["mean_change_c"],
+            "largest_cooling_c": after["min_change_c"],
+            "largest_warming_c": after["max_change_c"],
+            "noticeably_cooler_ha": after["area_noticeably_cooler_ha"],
+            "noticeably_warmer_ha": after["area_noticeably_warmer_ha"],
+            "canopy_pct_now": before["canopy_pct"],
+            "canopy_pct_after": after["canopy_pct"],
+        }
+
+    inside = picked("footprint")
+    if inside is None:
+        raise AreaError("The thermal model does not cover this area.")
+
+    return {
+        "change": change,
+        "label": option["label"],
+        "share": round(share, 2),
+        "land": LAND_NAMES[option["land"]],
+        "available_pct": round(100 * available, 1),
+        "changed_ha": round(inside["area_ha"] * share * available, 2),
+        "inside": inside,
+        "around": picked("impact_zone"),
+        "around_m": result["impact_zone_m"],
+        "method": {
+            **result["method"],
+            "spread": (
+                "The change is spread evenly over the land that can take it rather "
+                "than placed on particular plots, so this is an estimate of scale, "
+                "not a design."
+            ),
+        },
+    }
+
+
 def register_area_routes(app):
-    """Register POST /api/area/environment."""
+    """Register POST /api/area/environment and POST /api/area/what-if."""
     from flask import jsonify, request
+
+    @app.post("/api/area/what-if")
+    def area_what_if():
+        payload = request.get_json(silent=True) or {}
+
+        try:
+            return jsonify(what_if(
+                str(payload.get("district", "")).strip(),
+                payload.get("geometry"),
+                str(payload.get("change", "")),
+                payload.get("share", 0.5),
+            ))
+        except (AreaError, TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @app.post("/api/area/environment")
     def area_environment():

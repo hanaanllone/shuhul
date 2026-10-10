@@ -33,6 +33,9 @@ heat is repaid or suitable land nearby runs out. It says which.
 **Area analysis.** Draw any shape, or take a whole district, and read its
 surface temperature, tree canopy, land cover, roof cover, flood-prone share,
 lost water and how vegetation and built-up land have changed since 2017.
+Then ask what if: plant trees on half the open land, green the roofs or pave
+what is left, and see the estimated change in surface temperature inside the
+area and around it.
 
 **Ecological stress and greening priority.** Each district is divided into
 500 m zones scored for existing stress, with the reasons shown. The same zones

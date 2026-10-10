@@ -4,7 +4,7 @@ import BaseMap, { ResizeWatcher } from "../components/BaseMap";
 import DistrictSelect, { useDistricts } from "../components/DistrictSelect";
 import { LayerToggles, MapLegend, RasterLayers, useLayerManifest } from "../components/MapLayers";
 import type { ActiveLayers } from "../components/MapLayers";
-import { Panel, PanelSection, Stat, Tabs } from "../components/ui";
+import { Panel, PanelSection, SelectField, SliderField, Stat, Tabs } from "../components/ui";
 import { errorMessage, post } from "../lib/api";
 import { num, signed } from "../lib/format";
 import type { LatLng } from "../lib/types";
@@ -36,7 +36,47 @@ interface Legacy {
   water_cover?: { percentage?: number };
 }
 
-type TabId = "area" | "layers";
+interface ZoneChange {
+  area_ha: number;
+  now_c: number | null;
+  after_c: number | null;
+  change_c: number;
+  noticeably_cooler_ha: number;
+  noticeably_warmer_ha: number;
+  canopy_pct_now: number;
+  canopy_pct_after: number;
+}
+
+interface WhatIf {
+  label: string;
+  share: number;
+  land: string;
+  available_pct: number;
+  changed_ha: number;
+  inside: ZoneChange;
+  around: ZoneChange | null;
+  around_m: number;
+  method: { what: string; held_out_error_c: number; tree_note: string; spread: string };
+}
+
+type TabId = "area" | "whatif" | "layers";
+
+const CHANGES = [
+  { value: "trees", label: "Plant trees on open land" },
+  { value: "shrubs", label: "Plant shrubs and grass on open land" },
+  { value: "green_roofs", label: "Green the roofs" },
+  { value: "pave", label: "Pave the unbuilt land" },
+  { value: "build", label: "Build on the unbuilt land" },
+];
+
+// A smaller answer than this is not called a change.
+const NOTICEABLE_C = 0.25;
+
+function verdict(change: number): string {
+  if (change <= -NOTICEABLE_C) return "cooler";
+  if (change >= NOTICEABLE_C) return "warmer";
+  return "no noticeable change";
+}
 
 function ClickToDraw({ active, onAdd }: { active: boolean; onAdd: (point: LatLng) => void }) {
   useMapEvents({
@@ -60,20 +100,31 @@ export default function AreaAnalysis() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const [change, setChange] = useState("trees");
+  const [share, setShare] = useState(50);
+  const [whatIf, setWhatIf] = useState<WhatIf | null>(null);
+  const [whatIfBusy, setWhatIfBusy] = useState(false);
+  const [whatIfError, setWhatIfError] = useState("");
+
   const manifest = useLayerManifest(district);
   const hasShape = vertices.length >= 3;
+
+  function polygonOf(shape: LatLng[]) {
+    return shape.length >= 3
+      ? {
+          type: "Polygon",
+          coordinates: [[...shape, shape[0]].map((point) => [point.lng, point.lat])],
+        }
+      : undefined;
+  }
 
   async function analyse(shape: LatLng[]) {
     setBusy(true);
     setError("");
+    setWhatIf(null);
+    setWhatIfError("");
 
-    const geometry =
-      shape.length >= 3
-        ? {
-            type: "Polygon",
-            coordinates: [[...shape, shape[0]].map((point) => [point.lng, point.lat])],
-          }
-        : undefined;
+    const geometry = polygonOf(shape);
 
     try {
       const [fresh, original] = await Promise.all([
@@ -87,6 +138,27 @@ export default function AreaAnalysis() {
       setError(errorMessage(problem, "Could not analyse this area."));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function estimate() {
+    setWhatIfBusy(true);
+    setWhatIfError("");
+
+    try {
+      setWhatIf(
+        await post<WhatIf>("/api/area/what-if", {
+          district,
+          geometry: polygonOf(vertices),
+          change,
+          share: share / 100,
+        })
+      );
+    } catch (problem) {
+      setWhatIf(null);
+      setWhatIfError(errorMessage(problem, "Could not estimate this change."));
+    } finally {
+      setWhatIfBusy(false);
     }
   }
 
@@ -148,9 +220,95 @@ export default function AreaAnalysis() {
             onChange={setTab}
             tabs={[
               { id: "area", label: "Area" },
+              { id: "whatif", label: "What if" },
               { id: "layers", label: "Layers" },
             ]}
           />
+
+          {tab === "whatif" && (
+            <>
+              <h2 className="panel-title">What if this area changed?</h2>
+
+              {!hasShape || drawing ? (
+                <p className="note" style={{ marginTop: 10 }}>
+                  Draw an area on the Area tab first. The estimate is for a drawn area of 25 km² or less,
+                  where surface temperature has been mapped.
+                </p>
+              ) : (
+                <>
+                  <PanelSection>
+                    <SelectField label="Change" value={change} options={CHANGES} onChange={setChange} />
+                    <SliderField
+                      label="How much of that land"
+                      value={share}
+                      min={10}
+                      max={100}
+                      step={10}
+                      unit="%"
+                      onChange={setShare}
+                    />
+                    <button
+                      type="button"
+                      className="btn is-dark is-block"
+                      style={{ marginTop: 14 }}
+                      disabled={whatIfBusy}
+                      onClick={estimate}
+                    >
+                      {whatIfBusy ? "Estimating..." : "Estimate the effect"}
+                    </button>
+                  </PanelSection>
+
+                  {whatIfError && <p className="message" style={{ marginTop: 14 }}>{whatIfError}</p>}
+
+                  {whatIf && (
+                    <>
+                      <PanelSection heading="Inside the area">
+                        <div className="stat-grid">
+                          <Stat label="Surface now" value={`${num(whatIf.inside.now_c, 1)} °C`} />
+                          <Stat
+                            label="After"
+                            value={`${num(whatIf.inside.after_c, 1)} °C`}
+                            note={`${signed(whatIf.inside.change_c)} °C, ${verdict(whatIf.inside.change_c)}`}
+                          />
+                          <Stat
+                            label="Land changed"
+                            value={`${num(whatIf.changed_ha, 1)} ha`}
+                            note={`${num(whatIf.available_pct, 1)}% of the area could take it`}
+                          />
+                          <Stat
+                            label="Tree canopy"
+                            value={`${num(whatIf.inside.canopy_pct_after, 1)}%`}
+                            note={`Now ${num(whatIf.inside.canopy_pct_now, 1)}%`}
+                          />
+                        </div>
+                        <p className="note" style={{ marginTop: 8 }}>
+                          Counts {whatIf.land}. Noticeably cooler over {num(whatIf.inside.noticeably_cooler_ha, 1)} ha,
+                          noticeably warmer over {num(whatIf.inside.noticeably_warmer_ha, 1)} ha, of{" "}
+                          {num(whatIf.inside.area_ha, 1)} ha.
+                        </p>
+                      </PanelSection>
+
+                      {whatIf.around && (
+                        <PanelSection heading={`Area and ${num(whatIf.around_m)} m around it`}>
+                          <p>
+                            Average change <b>{signed(whatIf.around.change_c)} °C</b>, {verdict(whatIf.around.change_c)}.
+                          </p>
+                        </PanelSection>
+                      )}
+
+                      <PanelSection heading="How to read this">
+                        <p className="note">
+                          {whatIf.method.what} {whatIf.method.spread} {whatIf.method.tree_note} Changes smaller
+                          than {NOTICEABLE_C} °C are not called a change. Model error on land it was not trained
+                          on: {num(whatIf.method.held_out_error_c, 2)} °C.
+                        </p>
+                      </PanelSection>
+                    </>
+                  )}
+                </>
+              )}
+            </>
+          )}
 
           {tab === "layers" && (
             <LayerToggles
