@@ -1,8 +1,7 @@
 """
-Shuhul Ecological Stress — identification only.
+Shuhul Ecological Stress and greening priority.
 
-Generates a zone-level GeoJSON layer. It does not recommend interventions
-and does not change route planning.
+Generates a zone-level GeoJSON layer. It does not change route planning.
 
 Stress dimensions:
   low NDVI       -> higher stress
@@ -14,6 +13,11 @@ Stress dimensions:
 Indicators are normalized relative to the analysed district using the
 10th/90th percentiles. This is a screening/index layer, not a claim that
 the resulting score is an absolute ecological measurement.
+
+Greening priority ranks the same zones for planting: little tree canopy,
+a hot surface, busy roads and dense building push a zone up. Busy roads
+stand in for traffic pollution, because the air quality data available
+here is one modelled value for the whole district.
 """
 
 from pathlib import Path
@@ -57,6 +61,33 @@ DRIVER_LABELS = {
 }
 DRIVER_MIN_SCORE = 0.5
 MAX_DRIVERS = 3
+
+# Roads that carry through traffic. Their share of a zone stands in for
+# exposure to traffic pollution.
+MAIN_ROADS = {
+    "motorway", "trunk", "primary", "secondary", "tertiary",
+    "motorway_link", "trunk_link", "primary_link",
+    "secondary_link", "tertiary_link",
+}
+
+# WorldCover classes where planting is not the answer: open water and wetland.
+WATER_CLASSES = (80, 90)
+MOSTLY_WATER_PCT = 50.0
+
+# Greening priority: (zone property, weight, True when a high value raises
+# priority, what it means in a planner's words).
+# The highest-ranked 15% of zones are "high", the next 35% "moderate".
+GREENING_HIGH_SHARE = 0.15
+GREENING_MODERATE_SHARE = 0.50
+# A factor is named as a reason when the zone beats this share of zones on it.
+GREENING_REASON_MIN = 0.7
+
+GREENING_FACTORS = {
+    "canopy": ("canopy_cover_pct", 0.35, False, "Little tree canopy"),
+    "heat": ("mean_lst", 0.25, True, "Hot surface"),
+    "roads": ("main_road_pct", 0.25, True, "Busy roads"),
+    "built": ("built_up_density_pct", 0.15, True, "Densely built"),
+}
 
 
 def find_raster(directory, *names):
@@ -145,6 +176,138 @@ def building_grid(path, shape, transform, crs):
         return np.full(shape, np.nan, dtype="float32")
 
 
+def main_road_grid(path, shape, transform, crs):
+    """1 where a main road passes, on the district grid."""
+    if path is None:
+        return np.full(shape, np.nan, dtype="float32")
+
+    try:
+        roads = gpd.read_file(path)
+        if roads.crs is None:
+            roads = roads.set_crs(crs)
+        roads = roads.to_crs(crs)
+        roads = roads[roads["highway"].isin(MAIN_ROADS) & roads.geometry.notna()]
+        if roads.empty:
+            return np.zeros(shape, dtype="float32")
+
+        return rasterize(
+            [(geom, 1) for geom in roads.geometry],
+            out_shape=shape,
+            transform=transform,
+            fill=0,
+            dtype="uint8",
+            all_touched=True,
+        ).astype("float32")
+    except Exception:
+        return np.full(shape, np.nan, dtype="float32")
+
+
+def water_grid(landcover_path, water_path, shape, transform, crs):
+    """1 where the land is open water or wetland."""
+    if landcover_path is not None:
+        with rasterio.open(landcover_path) as src:
+            with WarpedVRT(
+                src, crs=crs, transform=transform,
+                width=shape[1], height=shape[0],
+                resampling=Resampling.nearest,
+            ) as vrt:
+                return np.isin(vrt.read(1), WATER_CLASSES).astype("float32")
+
+    if water_path is not None:
+        water = read_aligned(water_path, shape, transform, crs)
+        return (np.nan_to_num(water) > 0.5).astype("float32")
+
+    return np.zeros(shape, dtype="float32")
+
+
+def standing(values, value, high_raises):
+    """
+    Where a zone stands among the district's zones on one factor, 0 to 1:
+    the share of zones it beats. `values` is sorted ascending.
+    """
+    others = len(values) - 1
+    if others < 1:
+        return 0.0
+    if high_raises:
+        beaten = np.searchsorted(values, value, side="left")
+    else:
+        beaten = len(values) - np.searchsorted(values, value, side="right")
+    return float(beaten) / others
+
+
+def add_greening_priority(features):
+    """
+    Rank zones for planting. Each factor is the zone's standing among the
+    district's zones, and the factors are combined by weight. Zones that
+    are mostly water are left out. Levels are shares of the ranking, so
+    "high" always means the top of this district's list.
+    """
+    for feature in features:
+        zone = feature["properties"]
+        zone["greening_priority"] = None
+        zone["greening_level"] = "NOT_APPLICABLE"
+        zone["greening_rank"] = None
+        zone["greening_factors"] = {}
+        zone["greening_reasons"] = []
+
+    # Canopy is the point of the index: no canopy figure, no priority.
+    candidates = [
+        feature["properties"]
+        for feature in features
+        if (feature["properties"].get("water_pct") or 0.0) < MOSTLY_WATER_PCT
+        and feature["properties"].get("canopy_cover_pct") is not None
+    ]
+
+    spread = {}
+    for key, (field, _, _, _) in GREENING_FACTORS.items():
+        values = np.sort(np.array(
+            [zone[field] for zone in candidates if zone.get(field) is not None],
+            dtype="float64",
+        ))
+        # A factor that is the same everywhere cannot rank anything.
+        if values.size >= 2 and values[-1] > values[0]:
+            spread[key] = values
+
+    if "canopy" not in spread:
+        return 0
+
+    for zone in candidates:
+        parts = {}
+        for key, (field, weight, high_raises, _) in GREENING_FACTORS.items():
+            if key in spread and zone.get(field) is not None:
+                parts[key] = (standing(spread[key], zone[field], high_raises), weight)
+
+        score = float(np.average(
+            [value for value, _ in parts.values()],
+            weights=[weight for _, weight in parts.values()],
+        ))
+        ranked = sorted(
+            parts.items(), key=lambda item: item[1][0] * item[1][1], reverse=True
+        )
+
+        zone["greening_priority"] = round(score, 3)
+        zone["greening_factors"] = {
+            key: round(value, 3) for key, (value, _) in parts.items()
+        }
+        zone["greening_reasons"] = [
+            GREENING_FACTORS[key][3]
+            for key, (value, _) in ranked
+            if value >= GREENING_REASON_MIN
+        ][:MAX_DRIVERS]
+
+    scored = sorted(candidates, key=lambda zone: zone["greening_priority"], reverse=True)
+    for rank, zone in enumerate(scored, start=1):
+        share = rank / len(scored)
+        zone["greening_rank"] = rank
+        zone["greening_level"] = (
+            "HIGH" if share <= GREENING_HIGH_SHARE
+            else "MODERATE" if share <= GREENING_MODERATE_SHARE
+            else "LOW"
+        )
+
+    return len(scored)
+
+
 def zone_polygon(row0, row1, col0, col1, transform, crs):
     """Return the zone polygon in WGS84 for Leaflet/GeoJSON display."""
     x0, y1 = transform * (col0, row0)
@@ -167,6 +330,7 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
     roof_path = find_raster(directory, "buildings")
     lst_path = find_raster(directory, "lst", "land_surface_temperature")
     buildings_path = find_buildings(directory)
+    roads_path = directory / "roads.gpkg"
 
     if ndvi_path is None:
         raise FileNotFoundError(f"NDVI raster not found for district '{district}'.")
@@ -194,6 +358,14 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
         read_aligned(roof_path, shape, transform, crs)
         if roof_path
         else building_grid(buildings_path, shape, transform, crs)
+    )
+
+    main_roads = main_road_grid(
+        roads_path if roads_path.exists() else None, shape, transform, crs
+    )
+    water = water_grid(
+        find_raster(directory, "landcover"), find_raster(directory, "water"),
+        shape, transform, crs,
     )
 
     base_valid = finite(ndvi) & finite(ndwi)
@@ -290,6 +462,9 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
             building_valid = building_vals[valid & np.isfinite(building_vals)]
             building_pct = float(building_valid.mean() * 100) if building_valid.size else None
 
+            road_share = mean_in(main_roads)
+            water_share = mean_in(water)
+
             polygon = zone_polygon(row0, row1, col0, col1, transform, crs)
 
             features.append({
@@ -308,9 +483,22 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
                     "canopy_cover_pct": round(canopy_pct, 2) if canopy_pct is not None else None,
                     "built_up_density_pct": round(building_pct, 2) if building_pct is not None else None,
                     "mean_lst": round(mean_in(lst), 2) if lst_available else None,
+                    "main_road_pct": round(road_share * 100, 2) if road_share is not None else None,
+                    "water_pct": round(water_share * 100, 2) if water_share is not None else None,
                 },
             })
             zone_number += 1
+
+    # The older canopy layer carries a height on every vegetated cell, so
+    # only the tree cover layer can say where trees are missing.
+    tree_cover_known = canopy_path is not None and canopy_path.stem == "tree_height"
+    zones_ranked = add_greening_priority(features) if tree_cover_known else 0
+    if not zones_ranked:
+        for feature in features:
+            feature["properties"].update(
+                greening_priority=None, greening_level="NOT_APPLICABLE",
+                greening_rank=None, greening_factors={}, greening_reasons=[],
+            )
 
     return {
         "type": "FeatureCollection",
@@ -322,6 +510,31 @@ def generate_stress_data(district, zone_size_m=ZONE_SIZE_M):
             "normalization": "District-relative 10th–90th percentile scaling",
             "classification": {"LOW": "< 0.34", "MODERATE": "0.34–0.66", "HIGH": ">= 0.67"},
             "purpose": "Screening areas for ecological stress before development planning.",
+        },
+        "greening": {
+            "available": bool(zones_ranked),
+            "unavailable_reason": (
+                None if zones_ranked
+                else "Tree cover has not been mapped for this district yet."
+            ),
+            "zones_ranked": zones_ranked,
+            "weights": {key: factor[1] for key, factor in GREENING_FACTORS.items()},
+            "labels": {key: factor[3] for key, factor in GREENING_FACTORS.items()},
+            "scoring": (
+                "Each factor is the share of the district's zones that the zone beats "
+                "on it, from 0 to 1. The factors are combined by weight."
+            ),
+            "levels": (
+                f"High is the top {GREENING_HIGH_SHARE:.0%} of ranked zones, moderate "
+                f"the next {GREENING_MODERATE_SHARE - GREENING_HIGH_SHARE:.0%}, low the rest."
+            ),
+            "left_out": f"Zones that are {MOSTLY_WATER_PCT:.0f}% or more open water or wetland.",
+            "air_note": (
+                "Air quality here is one modelled value for the whole district, so it "
+                "cannot tell zones apart. The share of each zone taken up by main roads "
+                "stands in for exposure to traffic pollution. It is not a measurement."
+            ),
+            "confidence": "Low. A screening index for comparing zones inside one district.",
         },
     }
 
@@ -342,7 +555,9 @@ def cached_stress(district):
             find_raster(directory, "tree_height", "canopy", "chm"),
             find_raster(directory, "lst", "land_surface_temperature"),
             find_raster(directory, "buildings"),
+            find_raster(directory, "landcover"),
             find_buildings(directory),
+            directory / "roads.gpkg" if (directory / "roads.gpkg").exists() else None,
             Path(__file__),
         )
         if path is not None

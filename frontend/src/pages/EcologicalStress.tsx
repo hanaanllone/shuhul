@@ -4,13 +4,15 @@ import type { LatLngBoundsExpression } from "leaflet";
 import { GeoJSON } from "react-leaflet";
 import BaseMap, { FitBounds, ResizeWatcher } from "../components/BaseMap";
 import DistrictSelect, { useDistricts } from "../components/DistrictSelect";
-import { Panel, PanelSection, Stat } from "../components/ui";
+import { Panel, PanelSection, Stat, Tabs } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { num } from "../lib/format";
 
+type Level = "LOW" | "MODERATE" | "HIGH";
+
 interface Zone {
   zone_id: string;
-  stress_level: "LOW" | "MODERATE" | "HIGH";
+  stress_level: Level;
   stress_score: number;
   drivers: { key: string; label: string; score: number }[];
   indicator_scores: Record<string, number>;
@@ -18,16 +20,43 @@ interface Zone {
   canopy_cover_pct: number | null;
   built_up_density_pct: number | null;
   mean_lst: number | null;
+  main_road_pct: number | null;
+  greening_priority: number | null;
+  greening_level: Level | "NOT_APPLICABLE";
+  greening_rank: number | null;
+  greening_factors: Record<string, number>;
+  greening_reasons: string[];
 }
 
 interface StressData extends GeoJSON.FeatureCollection {
   methodology: { weights: Record<string, number>; normalization: string };
+  greening: {
+    available: boolean;
+    unavailable_reason: string | null;
+    zones_ranked: number;
+    weights: Record<string, number>;
+    labels: Record<string, string>;
+    scoring: string;
+    levels: string;
+    left_out: string;
+    air_note: string;
+    confidence: string;
+  };
 }
 
-const LEVELS: Record<string, { label: string; color: string }> = {
-  LOW: { label: "Low", color: "#5f9b6b" },
-  MODERATE: { label: "Moderate", color: "#d9a441" },
-  HIGH: { label: "High", color: "#c0563a" },
+interface DistrictAir {
+  air: { annual_mean_pm2_5?: number | null; days_over_standard?: number; days_with_data?: number } | null;
+}
+
+type View = "stress" | "greening";
+
+const LEVEL_NAMES: Record<Level, string> = { LOW: "Low", MODERATE: "Moderate", HIGH: "High" };
+
+// Stress uses the warning colours. Greening priority is one hue, light to
+// dark, so the two maps cannot be mistaken for each other.
+const COLORS: Record<View, Record<string, string>> = {
+  stress: { LOW: "#5f9b6b", MODERATE: "#d9a441", HIGH: "#c0563a" },
+  greening: { LOW: "#d5e6cb", MODERATE: "#7fb089", HIGH: "#1c5a3c", NOT_APPLICABLE: "#b9c0bb" },
 };
 
 const INDICATORS: Record<string, string> = {
@@ -38,23 +67,40 @@ const INDICATORS: Record<string, string> = {
   ndwi: "Surface moisture",
 };
 
+const TOP_ZONES = 8;
+
+// ["Little tree canopy", "Hot surface"] -> "Little tree canopy, hot surface"
+function asSentence(reasons: string[]): string {
+  const text = reasons.join(", ").toLowerCase();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export default function EcologicalStress() {
   const districts = useDistricts();
   const [district, setDistrict] = useState("sr-c");
+  const [view, setView] = useState<View>("stress");
   const [data, setData] = useState<StressData | null>(null);
+  const [air, setAir] = useState<DistrictAir["air"]>(null);
   const [error, setError] = useState("");
-  const [level, setLevel] = useState<string | null>(null);
+  const [level, setLevel] = useState<Level | null>(null);
   const [picked, setPicked] = useState<Zone | null>(null);
 
   useEffect(() => {
     setData(null);
+    setAir(null);
     setPicked(null);
     setError("");
 
     api<StressData>(`/api/stress/${district}`)
       .then(setData)
       .catch((problem) => setError(errorMessage(problem, "Could not load ecological stress.")));
+
+    api<DistrictAir>(`/api/climate/${district}`)
+      .then((climate) => setAir(climate.air))
+      .catch(() => setAir(null));
   }, [district]);
+
+  const levelOf = (zone: Zone) => (view === "stress" ? zone.stress_level : zone.greening_level);
 
   const zones = useMemo(() => (data?.features || []).map((feature) => feature.properties as Zone), [data]);
 
@@ -62,9 +108,10 @@ export default function EcologicalStress() {
     if (!data) return null;
     return {
       type: "FeatureCollection",
-      features: data.features.filter((feature) => !level || feature.properties?.stress_level === level),
+      features: data.features.filter((feature) => !level || levelOf(feature.properties as Zone) === level),
     };
-  }, [data, level]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, level, view]);
 
   const bounds = useMemo<LatLngBoundsExpression | null>(
     () => (data && data.features.length ? leafletGeoJSON(data).getBounds() : null),
@@ -74,10 +121,12 @@ export default function EcologicalStress() {
   const counts = useMemo(() => {
     const result: Record<string, number> = { LOW: 0, MODERATE: 0, HIGH: 0 };
     zones.forEach((zone) => {
-      result[zone.stress_level] += 1;
+      const key = levelOf(zone);
+      if (key in result) result[key] += 1;
     });
     return result;
-  }, [zones]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zones, view]);
 
   // What most often pushes a zone into stress in this district.
   const leading = useMemo(() => {
@@ -89,11 +138,25 @@ export default function EcologicalStress() {
     return Object.entries(result).sort((a, b) => b[1] - a[1]);
   }, [zones]);
 
+  const topZones = useMemo(
+    () =>
+      zones
+        .filter((zone) => zone.greening_rank !== null)
+        .sort((a, b) => (a.greening_rank as number) - (b.greening_rank as number))
+        .slice(0, TOP_ZONES),
+    [zones]
+  );
+
+  const greening = data?.greening;
+  const colors = COLORS[view];
+
   return (
     <main className="page">
       <div className="page-head">
         <h1 className="page-title">Ecological stress</h1>
-        <span className="page-sub">Where pressure is already high, and why</span>
+        <span className="page-sub">
+          {view === "stress" ? "Where pressure is already high, and why" : "Where planting would do the most good"}
+        </span>
       </div>
 
       <div className="split">
@@ -103,14 +166,18 @@ export default function EcologicalStress() {
             <FitBounds bounds={bounds} />
             {shown && (
               <GeoJSON
-                key={`${district}-${level}`}
+                key={`${district}-${view}-${level}-${picked?.zone_id}`}
                 data={shown}
-                style={(feature) => ({
-                  color: "#142a28",
-                  weight: 0.4,
-                  fillColor: LEVELS[feature?.properties?.stress_level]?.color,
-                  fillOpacity: 0.62,
-                })}
+                style={(feature) => {
+                  const zone = feature?.properties as Zone;
+                  const chosen = picked?.zone_id === zone.zone_id;
+                  return {
+                    color: "#142a28",
+                    weight: chosen ? 3 : 0.4,
+                    fillColor: colors[levelOf(zone)],
+                    fillOpacity: levelOf(zone) === "NOT_APPLICABLE" ? 0.25 : 0.66,
+                  };
+                }}
                 onEachFeature={(feature, layer) => {
                   layer.on("click", () => setPicked(feature.properties as Zone));
                 }}
@@ -119,48 +186,75 @@ export default function EcologicalStress() {
           </BaseMap>
 
           <div className="map-overlay is-bottom-left">
-            <div className="legend-title">Stress level</div>
-            {Object.entries(LEVELS).map(([key, value]) => (
+            <div className="legend-title">{view === "stress" ? "Stress level" : "Greening priority"}</div>
+            {(["HIGH", "MODERATE", "LOW"] as Level[]).map((key) => (
               <div className="legend-item" key={key}>
-                <span className="swatch" style={{ background: value.color }} />
-                {value.label}
+                <span className="swatch" style={{ background: colors[key] }} />
+                {LEVEL_NAMES[key]}
               </div>
             ))}
+            {view === "greening" && (
+              <div className="legend-item">
+                <span className="swatch" style={{ background: colors.NOT_APPLICABLE }} />
+                Mostly water, not ranked
+              </div>
+            )}
           </div>
         </div>
 
-        <Panel className="side" title="Ecological stress">
+        <Panel className="side">
+          <Tabs<View>
+            active={view}
+            onChange={(next) => {
+              setView(next);
+              setLevel(null);
+            }}
+            tabs={[
+              { id: "stress", label: "Stress" },
+              { id: "greening", label: "Greening priority" },
+            ]}
+          />
+
           <DistrictSelect districts={districts} value={district} onChange={setDistrict} />
 
           {error && <p className="message" style={{ marginTop: 14 }}>{error}</p>}
-          {!data && !error && <p className="note" style={{ marginTop: 14 }}>Working out stress zones...</p>}
+          {!data && !error && <p className="note" style={{ marginTop: 14 }}>Working out the zones...</p>}
 
-          {data && (
+          {data && view === "greening" && !greening?.available && (
+            <p className="message" style={{ marginTop: 14 }}>
+              Greening priority is not available here. {greening?.unavailable_reason}
+            </p>
+          )}
+
+          {data && (view === "stress" || greening?.available) && (
+            <PanelSection heading="Zones by level">
+              <div className="chip-row">
+                {(["HIGH", "MODERATE", "LOW"] as Level[]).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className="chip"
+                    aria-pressed={level === key}
+                    onClick={() => setLevel(level === key ? null : key)}
+                  >
+                    <span className="dot" style={{ background: colors[key] }} />
+                    {LEVEL_NAMES[key]} ({counts[key]})
+                  </button>
+                ))}
+              </div>
+              <p className="field-hint">Each zone is a 500 m square. Select a level to show only those zones.</p>
+            </PanelSection>
+          )}
+
+          {/* ---------- Stress ---------- */}
+          {data && view === "stress" && (
             <>
-              <PanelSection heading="Zones by level">
-                <div className="chip-row">
-                  {Object.entries(LEVELS).map(([key, value]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className="chip"
-                      aria-pressed={level === key}
-                      onClick={() => setLevel(level === key ? null : key)}
-                    >
-                      <span className="dot" style={{ background: value.color }} />
-                      {value.label} ({counts[key]})
-                    </button>
-                  ))}
-                </div>
-                <p className="field-hint">Each zone is a 500 m square. Select a level to show only those zones.</p>
-              </PanelSection>
-
               <PanelSection heading={picked ? picked.zone_id : "Select a zone on the map"}>
                 {picked ? (
                   <>
                     <p style={{ marginBottom: 10 }}>
                       <span className={`badge is-${picked.stress_level.toLowerCase()}`}>
-                        {LEVELS[picked.stress_level].label} stress
+                        {LEVEL_NAMES[picked.stress_level]} stress
                       </span>{" "}
                       score {num(picked.stress_score, 2)} of 1
                     </p>
@@ -206,8 +300,91 @@ export default function EcologicalStress() {
                 ))}
                 <p className="note" style={{ marginTop: 10 }}>
                   Each indicator is scaled against the rest of the district, between its 10th and 90th
-                  percentiles, then combined by fixed weights, shown when a zone is selected. This is a screening index for
-                  comparing places inside one district, not an absolute measure.
+                  percentiles, then combined by fixed weights, shown when a zone is selected. This is a
+                  screening index for comparing places inside one district, not an absolute measure.
+                </p>
+              </PanelSection>
+            </>
+          )}
+
+          {/* ---------- Greening priority ---------- */}
+          {data && view === "greening" && greening?.available && (
+            <>
+              <PanelSection heading={picked ? picked.zone_id : "Highest-ranked zones"}>
+                {picked ? (
+                  picked.greening_rank === null ? (
+                    <p className="note">This zone is mostly water, so it is not ranked for planting.</p>
+                  ) : (
+                    <>
+                      <p style={{ marginBottom: 10 }}>
+                        Ranked <b>{picked.greening_rank}</b> of {greening.zones_ranked}, score{" "}
+                        {num(picked.greening_priority, 2)} of 1
+                      </p>
+
+                      {picked.greening_reasons.length > 0 && (
+                        <p style={{ marginBottom: 12 }}>Why: {picked.greening_reasons.join(", ").toLowerCase()}.</p>
+                      )}
+
+                      <div className="stat-grid">
+                        <Stat label="Tree canopy" value={`${num(picked.canopy_cover_pct, 1)}%`} />
+                        <Stat label="Surface temp." value={picked.mean_lst === null ? "—" : `${num(picked.mean_lst, 1)} °C`} />
+                        <Stat label="Main roads" value={`${num(picked.main_road_pct, 1)}%`} note="Share of the zone" />
+                        <Stat label="Under roofs" value={`${num(picked.built_up_density_pct, 1)}%`} />
+                      </div>
+
+                      <table className="table" style={{ marginTop: 12 }}>
+                        <thead>
+                          <tr><th>Factor</th><th>Standing, 0 to 1</th><th>Weight</th></tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(picked.greening_factors).map(([key, value]) => (
+                            <tr key={key}>
+                              <td>{greening.labels[key] || key}</td>
+                              <td>{num(value, 2)}</td>
+                              <td>{num((greening.weights[key] || 0) * 100)}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+
+                      <button className="link-btn" style={{ marginTop: 10, fontSize: 13 }} onClick={() => setPicked(null)}>
+                        Back to the highest-ranked zones
+                      </button>
+                    </>
+                  )
+                ) : (
+                  <>
+                    {topZones.map((zone) => (
+                      <div className="report-item" key={zone.zone_id}>
+                        <button className="link-btn" onClick={() => setPicked(zone)}>
+                          {zone.greening_rank}. {zone.zone_id}
+                        </button>
+                        <p className="note">
+                          {asSentence(zone.greening_reasons) || "No single factor stands out"}. Canopy{" "}
+                          {num(zone.canopy_cover_pct, 1)}%, surface {num(zone.mean_lst, 1)} °C.
+                        </p>
+                      </div>
+                    ))}
+                    <p className="field-hint">Select a zone here or on the map to see what sets its rank.</p>
+                  </>
+                )}
+              </PanelSection>
+
+              <PanelSection heading="Air">
+                {air?.annual_mean_pm2_5 != null && (
+                  <p style={{ fontSize: 14, marginBottom: 8 }}>
+                    District air, past year: <b>{num(air.annual_mean_pm2_5, 0)} µg/m³</b> of fine particles on
+                    average, over the daily standard on {num(air.days_over_standard)} of {num(air.days_with_data)} days.
+                  </p>
+                )}
+                <p className="note">{greening.air_note}</p>
+              </PanelSection>
+
+              <PanelSection heading="How zones are ranked">
+                <p className="note">
+                  {greening.scoring} {greening.levels} Left out: {greening.left_out.toLowerCase()} A high rank
+                  says a zone needs planting more than others in this district. It does not say land is free
+                  to plant. Confidence: {greening.confidence.toLowerCase()}
                 </p>
               </PanelSection>
             </>
