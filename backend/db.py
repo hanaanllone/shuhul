@@ -376,7 +376,7 @@ def add_watch_issue(values):
 
 
 def list_watch_issues(district=None, category=None, since=None, limit=200):
-    query = select(watch_issues).order_by(watch_issues.c.published_at.desc()).limit(limit)
+    query = select(watch_issues).order_by(watch_issues.c.published_at.desc().nulls_last()).limit(limit)
 
     if district:
         query = query.where(watch_issues.c.district_code == district)

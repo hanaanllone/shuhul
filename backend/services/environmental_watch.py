@@ -44,7 +44,14 @@ from typing import Any, Iterable, Optional
 # parents[3] = Shuhul
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ARTICLES_DIR = PROJECT_ROOT / "articles"
-WATCH_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "environmental_watch"
+
+# Saved analyses go wherever the rest of the app writes its outputs.
+try:
+    from ..config import OUTPUT_ROOT
+except ImportError:
+    OUTPUT_ROOT = PROJECT_ROOT / "outputs"
+
+WATCH_OUTPUT_DIR = Path(OUTPUT_ROOT) / "environmental_watch"
 
 
 # ---------------------------------------------------------------------------
