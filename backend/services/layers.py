@@ -148,6 +148,22 @@ LAYERS = {
         "resolution_m": 10,
         "confidence": "High",
     },
+    "ndwi": {
+        "title": "Water index",
+        "group": "Water",
+        "file": "ndwi.tif",
+        "kind": "continuous",
+        "unit": "NDWI",
+        "palette": BLUES,
+        "domain": [-0.7, 0.2],
+        "source": SENTINEL,
+        "resolution_m": 10,
+        "confidence": "High",
+        "note": (
+            "Wetness index. High over open water and wet ground, low over dry land and "
+            "buildings. Water under weed or algae reads lower than open water."
+        ),
+    },
     "water_occurrence": {
         "title": "Water history",
         "group": "Water",
