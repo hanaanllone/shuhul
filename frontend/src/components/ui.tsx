@@ -121,6 +121,16 @@ export function SelectField({ label, value, options, onChange, hint }: SelectFie
   );
 }
 
+// A small "i" that says in a line what a setting does, on hover, focus or tap.
+export function Info({ text }: { text: string }) {
+  return (
+    <span className="info" tabIndex={0} role="note" aria-label={text}>
+      i
+      <span className="info-text" aria-hidden="true">{text}</span>
+    </span>
+  );
+}
+
 interface SliderFieldProps {
   label: string;
   value: number;
@@ -129,13 +139,17 @@ interface SliderFieldProps {
   max?: number;
   step?: number;
   unit?: string;
+  info?: string;
 }
 
-export function SliderField({ label, value, onChange, min = 0, max = 100, step = 1, unit = "" }: SliderFieldProps) {
+export function SliderField({ label, value, onChange, min = 0, max = 100, step = 1, unit = "", info }: SliderFieldProps) {
   return (
     <label className="field">
       <span className="field-label">
-        {label}
+        <span>
+          {label}
+          {info && <Info text={info} />}
+        </span>
         <span className="field-value">{value}{unit}</span>
       </span>
       <input

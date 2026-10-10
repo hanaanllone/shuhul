@@ -32,14 +32,15 @@ export const DEFAULT_FORM: PlannerForm = {
   },
 };
 
-const PRIORITIES: [string, string][] = [
-  ["treePriority", "Protect trees"],
-  ["greeneryPriority", "Protect green space"],
-  ["waterPriority", "Protect water"],
-  ["heatPriority", "Avoid adding heat"],
-  ["floodPriority", "Avoid flood-prone land"],
-  ["shortestPriority", "Keep the route short"],
-  ["constructionPriority", "Ease of construction"],
+// Each priority, with one plain line on what moving it does.
+const PRIORITIES: [string, string, string][] = [
+  ["treePriority", "Protect trees", "Higher keeps routes away from trees."],
+  ["greeneryPriority", "Protect green space", "Higher keeps routes off fields, parks and other green land."],
+  ["waterPriority", "Protect water", "Higher keeps routes away from rivers, lakes and wet ground."],
+  ["heatPriority", "Avoid adding heat", "Higher avoids land that would warm most if paved."],
+  ["floodPriority", "Avoid flood-prone land", "Higher avoids low ground where water has stood before."],
+  ["shortestPriority", "Keep the route short", "Higher makes the balanced route more direct and less careful of the land."],
+  ["constructionPriority", "Ease of construction", "Higher avoids steep slopes and buildings in the way."],
 ];
 
 const CONSTRAINTS: [string, string, string][] = [
@@ -58,14 +59,16 @@ interface Props {
   onPickPoint: (name: PointName | null) => void;
   running: { stage: string; progress: number } | null;
   error: string;
-  onRun: () => void;
+  // True when a saved project is open, so it can be updated in place.
+  existing: boolean;
+  onRun: (mode: "new" | "update") => void;
 }
 
 function pointText(point: LatLng | null) {
   return point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "Not set";
 }
 
-export default function SetupPanel({ form, onChange, points, picking, onPickPoint, running, error, onRun }: Props) {
+export default function SetupPanel({ form, onChange, points, picking, onPickPoint, running, error, existing, onRun }: Props) {
   const ready = Boolean(points.A && points.B);
 
   return (
@@ -94,6 +97,7 @@ export default function SetupPanel({ form, onChange, points, picking, onPickPoin
           max={60}
           step={2}
           unit=" m"
+          info="How wide a strip of land the project takes."
           onChange={(widthMeters) => onChange({ ...form, widthMeters })}
         />
       </PanelSection>
@@ -120,10 +124,11 @@ export default function SetupPanel({ form, onChange, points, picking, onPickPoin
       </PanelSection>
 
       <PanelSection heading="Priorities">
-        {PRIORITIES.map(([key, label]) => (
+        {PRIORITIES.map(([key, label, info]) => (
           <SliderField
             key={key}
             label={label}
+            info={info}
             value={form.priorities[key]}
             onChange={(value) => onChange({ ...form, priorities: { ...form.priorities, [key]: value } })}
           />
@@ -152,8 +157,26 @@ export default function SetupPanel({ form, onChange, points, picking, onPickPoin
             </div>
             <p className="note" style={{ marginTop: 8 }}>{running.stage}</p>
           </>
+        ) : existing ? (
+          <>
+            <button type="button" className="btn is-dark is-block" disabled={!ready} onClick={() => onRun("update")}>
+              Update this project
+            </button>
+            <button
+              type="button"
+              className="btn is-ghost is-block"
+              style={{ marginTop: 8 }}
+              disabled={!ready}
+              onClick={() => onRun("new")}
+            >
+              Save as a new project
+            </button>
+            <p className="field-hint">
+              Updating replaces this project's routes. Saving as new keeps them and adds another project.
+            </p>
+          </>
         ) : (
-          <button type="button" className="btn is-dark is-block" disabled={!ready} onClick={onRun}>
+          <button type="button" className="btn is-dark is-block" disabled={!ready} onClick={() => onRun("new")}>
             Plan routes
           </button>
         )}

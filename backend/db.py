@@ -217,6 +217,34 @@ def create_project(project_id, user_id, project_name, payload):
         )
 
 
+def requeue_project(project_id, user_id, project_name, payload):
+    """
+    Put an existing project back in the queue with new settings. Its old
+    result is cleared. Returns False when the project is not this user's
+    or is still being analysed.
+    """
+    with engine.begin() as conn:
+        return bool(conn.execute(
+            update(projects)
+            .where(
+                projects.c.id == project_id,
+                projects.c.user_id == user_id,
+                projects.c.status.notin_(ACTIVE_STATUSES),
+            )
+            .values(
+                project_name=project_name,
+                payload_json=json.dumps(payload),
+                status="queued",
+                stage="Queued for analysis",
+                progress=0,
+                result_json=None,
+                preview_json=None,
+                error=None,
+                updated_at=_now(),
+            )
+        ).rowcount)
+
+
 def update_project(project_id, **fields):
     allowed = {"status", "stage", "progress", "result_json", "preview_json", "error"}
     values = {}

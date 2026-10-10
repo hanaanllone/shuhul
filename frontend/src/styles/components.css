@@ -265,6 +265,50 @@
   color: var(--muted-on-light);
 }
 
+/* The "i" beside a setting, and the line it shows. */
+.info {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border: 1px solid var(--slate);
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  color: var(--slate);
+  cursor: help;
+  vertical-align: 1px;
+}
+
+.info-text {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: none;
+  width: 210px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--forest-800);
+  color: var(--ivory);
+  font-size: 12px;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.4;
+  text-align: left;
+  transform: translateX(-30%);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+
+.info:hover .info-text,
+.info:focus .info-text {
+  display: block;
+}
+
 .field-hint {
   margin-top: 4px;
   font-size: 12px;

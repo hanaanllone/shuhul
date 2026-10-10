@@ -21,6 +21,7 @@ from .db import (
     init_db, create_user, get_user_by_email, get_user,
     update_user, get_password_hash, set_password_hash,
     create_project, get_project, list_projects, count_active_projects,
+    requeue_project,
 )
 from .services.map_layers import register_map_layer_routes, build_project_corridors
 from .services.aoi_analysis import register_aoi_routes
@@ -274,6 +275,43 @@ def start_project(user):
 
     project_id = str(uuid.uuid4())
     create_project(project_id, user["id"], project_name, body)
+
+    return jsonify({
+        "projectId": project_id,
+        "status": "queued",
+        "stage": "Queued for analysis",
+        "progress": 0,
+    }), 202
+
+@app.put("/api/projects/<project_id>")
+@login_required
+def rerun_project(user, project_id):
+    """
+    Run an existing project again with changed settings. It stays the
+    same project: the old result is replaced, not kept beside the new one.
+    """
+    body = request.get_json(silent=True) or {}
+    project_name = (
+        str(body.get("projectName", "Untitled Project")).strip()
+        or "Untitled Project"
+    )
+
+    project = get_project(project_id, user["id"])
+    if not project:
+        return jsonify({"error": "Project not found."}), 404
+    if project["status"] in ("queued", "running"):
+        return jsonify({"error": "This project is still being analysed."}), 409
+
+    if count_active_projects(user["id"]) >= MAX_ACTIVE_PROJECTS_PER_USER:
+        return jsonify({
+            "error": (
+                "You already have analyses running. "
+                "Wait for one to finish before starting another."
+            )
+        }), 429
+
+    if not requeue_project(project_id, user["id"], project_name, body):
+        return jsonify({"error": "This project is still being analysed."}), 409
 
     return jsonify({
         "projectId": project_id,

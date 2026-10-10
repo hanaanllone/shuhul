@@ -37,6 +37,8 @@ function readFocus(): WatchFocus | null {
 
 export default function RoutePlanner({ projectId }: Props) {
   const [focus] = useState(readFocus);
+  // The project on screen: the one opened, or the one just created.
+  const [currentId, setCurrentId] = useState<string | undefined>(projectId);
   const [form, setForm] = useState<PlannerForm>(DEFAULT_FORM);
   const [points, setPoints] = useState<Record<PointName, LatLng | null>>({ A: null, B: null });
   const [picking, setPicking] = useState<PointName | null>(null);
@@ -160,27 +162,38 @@ export default function RoutePlanner({ projectId }: Props) {
     }
   }
 
-  async function run() {
+  // "update" runs the open project again in place; "new" makes another one.
+  async function run(mode: "new" | "update") {
     if (!points.A || !points.B) return;
 
     setError("");
     setResult(null);
     setCorridors(null);
+    setHighlightZone(null);
+
+    const settings = {
+      projectName: form.projectName.trim() || "Untitled Project",
+      constructionType: form.constructionType,
+      widthMeters: form.widthMeters,
+      start: points.A,
+      end: points.B,
+      softPreferences: form.priorities,
+      hardConstraints: form.constraints,
+    };
 
     try {
-      const created = await post<{ projectId: string }>("/api/projects", {
-        projectName: form.projectName.trim() || "Untitled Project",
-        constructionType: form.constructionType,
-        widthMeters: form.widthMeters,
-        start: points.A,
-        end: points.B,
-        softPreferences: form.priorities,
-        hardConstraints: form.constraints,
-      });
+      const started =
+        mode === "update" && currentId
+          ? await api<{ projectId: string }>(`/api/projects/${currentId}`, {
+              method: "PUT",
+              body: JSON.stringify(settings),
+            })
+          : await post<{ projectId: string }>("/api/projects", settings);
 
       // Keep the address in step without reloading the page.
-      window.history.replaceState(null, "", `#/plan/${created.projectId}`);
-      follow(created.projectId);
+      window.history.replaceState(null, "", `#/plan/${started.projectId}`);
+      setCurrentId(started.projectId);
+      follow(started.projectId);
     } catch (problem) {
       setError(errorMessage(problem, "Could not start the analysis."));
     }
@@ -252,6 +265,7 @@ export default function RoutePlanner({ projectId }: Props) {
                 onPickPoint={setPicking}
                 running={running}
                 error={error}
+                existing={Boolean(currentId)}
                 onRun={run}
               />
             </>
