@@ -289,11 +289,12 @@ about 10 to 25 km) and air quality from Open-Meteo's CAMS global model (about
 Eleven districts of Kashmir: Srinagar, Srinagar city, Anantnag, Bandipora,
 Baramulla, Budgam, Ganderbal, Kulgam, Kupwara, Pulwama and Shopian.
 
-Srinagar and Srinagar city have every layer and every feature. The other
-districts have the layers that need no thermal model: vegetation, water
-index, water, land cover, tree canopy, hill forest, building cover, heritage
-buffer, water history, lost water, flood and slope. Where a district lacks
-the data for a feature, the page says "No data".
+Every district has every layer and every feature. Srinagar and Srinagar city
+have a summer composite for each year from 2017 to 2025, so their change over
+time runs nine years. The other nine districts have the latest three summers,
+2023 to 2025, which is what the surface temperature layer needs; their change
+over time is three years long. Where a place lacks the data for something,
+the page says "No data".
 
 ## How the estimates are made
 
@@ -318,12 +319,29 @@ total of 1.
 read inside it. Tree-equivalents are canopy area divided by 25 m² a tree.
 Green space is land with a vegetation index of 0.30 or more.
 
-**Heat** comes from a gradient-boosted model trained on 300,000 cells of
-Srinagar district to predict summer surface temperature from vegetation,
-canopy, roofs, land cover, water, terrain and the surroundings at two
-distances. Tested on whole 3 km blocks it never saw, its typical error is
-2.33 °C (root mean square) and it explains 88% of the variation. A change of
-surface is simulated by changing a cell's inputs and predicting again.
+**Heat** comes from a gradient-boosted model that predicts summer surface
+temperature from vegetation, canopy, roofs, land cover, water, terrain and
+the surroundings at two distances. Each district has its own model, trained
+on 300,000 of its cells and tested on whole 3 km blocks it never saw. The
+typical error (root mean square) and the share of variation explained:
+
+| District | Typical error | Variation explained |
+| --- | --- | --- |
+| Srinagar, also used for Srinagar city | 2.33 °C | 88% |
+| Shopian | 1.65 °C | 79% |
+| Kupwara | 1.98 °C | 81% |
+| Baramulla | 2.06 °C | 83% |
+| Pulwama | 2.27 °C | 87% |
+| Budgam | 3.14 °C | 82% |
+| Ganderbal | 3.29 °C | 78% |
+| Kulgam | 3.36 °C | 74% |
+| Bandipora | 4.01 °C | 68% |
+| Anantnag | 4.27 °C | 77% |
+
+The models for the mountain districts are weaker: their land runs from valley
+floor to snowline, which is harder to predict than a city. The app shows the
+error of the model it used beside every heat estimate. A change of surface is
+simulated by changing a cell's inputs and predicting again.
 Planting takes only open land and leaves buildings standing. Heat added is
 reported in degree-hectares: degrees of warming times the area warmed, within
 300 m.
