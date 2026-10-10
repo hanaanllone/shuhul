@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./frontend_api";
+import RegionNow from "./RegionNow";
 
 interface Project {
   id: string;
@@ -196,6 +197,10 @@ export default function RecentWork({
                 sustainable infrastructure analysis.
               </div>
             )}
+
+            <div style={{ padding: "0 24px 24px" }}>
+              <RegionNow />
+            </div>
           </section>
         </div>
       </main>

@@ -27,6 +27,7 @@ from .services.environmental_watch_demo_route import (
     register_environmental_watch_demo_route
 )
 from .services.watch_ingest import register_watch_routes
+from .services.climate import register_climate_routes
 
 app = Flask(__name__)
 
@@ -38,6 +39,7 @@ register_stress_routes(app)
 register_environmental_watch_routes(app)
 register_environmental_watch_demo_route(app)
 register_watch_routes(app)
+register_climate_routes(app)
 register_map_layer_routes(app)
 
 app.config.update(
