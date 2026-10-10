@@ -7,6 +7,7 @@ import math
 import shutil
 import threading
 import time
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -81,6 +82,21 @@ MS_BUILDINGS_INDEX = (
     "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
 )
 MS_BUILDINGS_ZOOM = 9
+
+# Lakes, wetlands and rivers as mapped on OpenStreetMap, from the
+# Geofabrik extract for northern India. Mapped outlines take in the parts
+# of a lake under weed or algae, which a satellite water index reads as
+# land. Only the two water layers are read out of the remote archive.
+OSM_EXTRACT = (
+    "/vsizip//vsicurl/https://download.geofabrik.de/asia/india/"
+    "northern-zone-latest-free.shp.zip/{layer}.shp"
+)
+OSM_WATER_AREAS = "gis_osm_water_a_free_1"
+OSM_WATERWAYS = "gis_osm_waterways_free_1"
+
+# How the extract's classes are read: standing water, wetland, or flowing.
+OSM_AREA_KINDS = {"water": "lake", "reservoir": "lake", "wetland": "wetland", "river": "river"}
+OSM_LINE_KINDS = {"river": "river", "canal": "river"}
 
 GDAL_ENV = {
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
@@ -546,10 +562,47 @@ def fetch_ms_buildings(district):
 
 
 # ------------------------------------------------------------
+# OPENSTREETMAP WATER
+# ------------------------------------------------------------
+
+def fetch_osm_water(district):
+    import geopandas as gpd
+    import pandas as pd
+
+    log("\nOpenStreetMap lakes, wetlands and rivers")
+
+    destination = RAW_ROOT / "osm" / f"{district}_water.gpkg"
+    if destination.exists() and destination.stat().st_size > 0:
+        log(f"  exists  {destination.relative_to(PROJECT_ROOT)}")
+        return destination
+
+    _, _, wgs84 = district_extent(district)
+
+    with rasterio.Env(**GDAL_ENV):
+        areas = gpd.read_file(OSM_EXTRACT.format(layer=OSM_WATER_AREAS), bbox=wgs84)
+        lines = gpd.read_file(OSM_EXTRACT.format(layer=OSM_WATERWAYS), bbox=wgs84)
+
+    areas["kind"] = areas["fclass"].map(OSM_AREA_KINDS)
+    lines["kind"] = lines["fclass"].map(OSM_LINE_KINDS)
+    # A river or canal mapped only as a line keeps its class, for its width.
+    lines["line"] = lines["fclass"]
+    areas["line"] = None
+
+    found = pd.concat([areas, lines], ignore_index=True)
+    found = found[found["kind"].notna()][["osm_id", "kind", "line", "name", "geometry"]]
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    found.to_file(destination, driver="GPKG")
+    log(f"  {len(found)} features -> {destination.relative_to(PROJECT_ROOT)}")
+    log(f"  {found['kind'].value_counts().to_dict()}")
+    return destination
+
+
+# ------------------------------------------------------------
 # MAIN
 # ------------------------------------------------------------
 
-FETCHERS = ["worldcover", "jrc", "buildings", "landsat"]
+FETCHERS = ["worldcover", "jrc", "buildings", "osm_water", "landsat"]
 
 
 def main():
@@ -565,6 +618,8 @@ def main():
         fetch_jrc(args.district)
     if "buildings" in args.what:
         fetch_ms_buildings(args.district)
+    if "osm_water" in args.what:
+        fetch_osm_water(args.district)
     if "landsat" in args.what:
         fetch_landsat(args.district, parse_years(args.years))
 
