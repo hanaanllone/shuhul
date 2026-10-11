@@ -5,6 +5,7 @@ from collections import defaultdict, deque
 from functools import wraps
 
 from flask import Flask, jsonify, request, send_file, session
+from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -35,11 +36,22 @@ from .services.climate import register_climate_routes
 from .services.area_environment import register_area_routes
 from .services.site_finder import register_site_routes
 from .services.report_brief import register_brief_routes
+from .services.jsonsafe import finite
 
 app = Flask(__name__)
 
 # Keep keys in the order they were written, so map layers list as registered.
-app.json.sort_keys = False
+
+
+class SafeJSON(DefaultJSONProvider):
+    """Answers keep their key order, and never carry NaN or infinity."""
+    sort_keys = False
+
+    def dumps(self, obj, **kwargs):
+        return super().dumps(finite(obj), **kwargs)
+
+
+app.json = SafeJSON(app)
 
 register_aoi_routes(app)
 register_stress_routes(app)

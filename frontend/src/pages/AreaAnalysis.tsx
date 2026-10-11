@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import BaseMap, { ResizeWatcher } from "../components/BaseMap";
+import BaseMap, { FitBounds, ResizeWatcher } from "../components/BaseMap";
 import DistrictSelect, { useDistricts } from "../components/DistrictSelect";
 import DrawTools from "../components/DrawTools";
 import type { DrawMode } from "../components/DrawTools";
@@ -201,7 +201,11 @@ export default function AreaAnalysis() {
       <div className="page-head">
         <h1 className="page-title">Area analysis</h1>
         <span className="page-sub">
-          {environment ? `${num(environment.area_km2, 2)} km², ${environment.scope}` : "Measure any area"}
+          {busy
+            ? "Measuring..."
+            : environment
+              ? `${num(environment.area_km2, 2)} km², ${environment.scope}`
+              : "Measure any area"}
         </span>
       </div>
 
@@ -209,6 +213,7 @@ export default function AreaAnalysis() {
         <div className="map-card">
           <BaseMap>
             <ResizeWatcher />
+            <FitBounds bounds={manifest?.bounds || null} />
             <RasterLayers manifest={manifest} active={activeLayers} />
             <DrawTools
               mode={mode}

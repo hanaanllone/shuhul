@@ -24,13 +24,23 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     },
   });
 
-  const data = await response.json().catch(() => ({}));
+  // An answer that is not JSON is not quietly turned into an empty one:
+  // pages would go on to read fields that are not there.
+  let unreadable = false;
+  const data = await response.json().catch(() => {
+    unreadable = true;
+    return {};
+  });
 
   if (!response.ok) {
     throw new ApiError(
       data.error || data.message || `Request failed (${response.status})`,
       response.status
     );
+  }
+
+  if (unreadable) {
+    throw new ApiError("The server's answer could not be read. Please try again.", response.status);
   }
 
   return data as T;

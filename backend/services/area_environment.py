@@ -139,16 +139,23 @@ def _yearly_folder(district, area):
     """
     candidates = [Path(PROCESSED_ROOT) / district] + sorted(Path(PROCESSED_ROOT).glob("*"))
 
+    # A district's grid is a rectangle that runs past its boundary into its
+    # neighbours, where it is empty. The folder with the most readings over
+    # the area is the one that covers it; the district asked for wins a tie.
+    best, most, seen = None, 0, set()
+
     for folder in candidates:
         probe = folder / "yearly" / "lst_current.tif"
-        if not probe.exists():
+        if folder.name in seen or not probe.exists():
             continue
-        with rasterio.open(probe) as src:
-            left, bottom, right, top = src.bounds
-            minx, miny, maxx, maxy = area.bounds
-            if left <= minx and bottom <= miny and right >= maxx and top >= maxy:
-                return folder / "yearly"
-    return None
+        seen.add(folder.name)
+
+        values, _ = _values(probe, area)
+        found = 0 if values is None else int(values.size)
+        if found > most:
+            best, most = folder / "yearly", found
+
+    return best
 
 
 def _round(value, digits=2):

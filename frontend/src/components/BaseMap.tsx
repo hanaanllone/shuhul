@@ -32,7 +32,8 @@ export function FitBounds({ bounds }: { bounds: LatLngBoundsExpression | null })
   const map = useMap();
 
   useEffect(() => {
-    if (bounds) map.fitBounds(bounds, { padding: [40, 40] });
+    // Straight there, without the glide: a district can be far from the last one.
+    if (bounds) map.fitBounds(bounds, { padding: [40, 40], animate: false });
   }, [map, bounds]);
 
   return null;

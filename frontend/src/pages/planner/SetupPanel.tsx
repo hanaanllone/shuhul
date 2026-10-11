@@ -59,8 +59,12 @@ interface Props {
   onPickPoint: (name: PointName | null) => void;
   running: { stage: string; progress: number } | null;
   error: string;
-  // True when a saved project is open, so it can be updated in place.
-  existing: boolean;
+  // A project opened from Home, as against one being made now.
+  reopened: boolean;
+  // Something differs from what the open project was last run with.
+  edited: boolean;
+  // The open project has routes to show.
+  hasResult: boolean;
   onRun: (mode: "new" | "update") => void;
 }
 
@@ -68,7 +72,19 @@ function pointText(point: LatLng | null) {
   return point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "Not set";
 }
 
-export default function SetupPanel({ form, onChange, points, picking, onPickPoint, running, error, existing, onRun }: Props) {
+export default function SetupPanel({
+  form,
+  onChange,
+  points,
+  picking,
+  onPickPoint,
+  running,
+  error,
+  reopened,
+  edited,
+  hasResult,
+  onRun,
+}: Props) {
   const ready = Boolean(points.A && points.B);
 
   return (
@@ -157,7 +173,11 @@ export default function SetupPanel({ form, onChange, points, picking, onPickPoin
             </div>
             <p className="note" style={{ marginTop: 8 }}>{running.stage}</p>
           </>
-        ) : existing ? (
+        ) : reopened && !edited && hasResult ? (
+          <p className="field-hint">
+            Change a setting or move a point to run this project again.
+          </p>
+        ) : reopened ? (
           <>
             <button type="button" className="btn is-dark is-block" disabled={!ready} onClick={() => onRun("update")}>
               Update this project
@@ -176,7 +196,8 @@ export default function SetupPanel({ form, onChange, points, picking, onPickPoin
             </p>
           </>
         ) : (
-          <button type="button" className="btn is-dark is-block" disabled={!ready} onClick={() => onRun("new")}>
+          // A project being made now is one project however often it is run.
+          <button type="button" className="btn is-dark is-block" disabled={!ready} onClick={() => onRun("update")}>
             Plan routes
           </button>
         )}

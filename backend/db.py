@@ -20,6 +20,7 @@ from sqlalchemy import (
 )
 
 from .config import DATABASE_PATH, DATABASE_URL
+from .services.jsonsafe import finite
 
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
@@ -253,7 +254,7 @@ def update_project(project_id, **fields):
         if key not in allowed:
             continue
         if key in ("result_json", "preview_json") and not isinstance(value, str):
-            value = json.dumps(value)
+            value = json.dumps(finite(value))
         values[key] = value
 
     if not values:

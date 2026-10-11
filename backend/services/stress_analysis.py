@@ -36,8 +36,10 @@ from pyproj import Transformer
 
 try:
     from ..config import PROCESSED_ROOT, OUTPUT_ROOT
+    from .jsonsafe import finite as json_safe
 except ImportError:
     from config import PROCESSED_ROOT, OUTPUT_ROOT
+    from jsonsafe import finite as json_safe
 
 
 ZONE_SIZE_M = 500.0
@@ -696,7 +698,7 @@ def cached_stress(district):
     ):
         return cache.read_text(encoding="utf-8")
 
-    text = json.dumps(generate_stress_data(district))
+    text = json.dumps(json_safe(generate_stress_data(district)))
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(text, encoding="utf-8")
     return text

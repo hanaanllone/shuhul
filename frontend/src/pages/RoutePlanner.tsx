@@ -35,10 +35,25 @@ function readFocus(): WatchFocus | null {
   }
 }
 
+// Everything a run depends on, as one string, so two states can be compared.
+function settingsKey(form: PlannerForm, points: Record<PointName, LatLng | null>): string {
+  return JSON.stringify([
+    form.projectName.trim(),
+    form.constructionType,
+    form.widthMeters,
+    form.priorities,
+    form.constraints,
+    points.A,
+    points.B,
+  ]);
+}
+
 export default function RoutePlanner({ projectId }: Props) {
   const [focus] = useState(readFocus);
   // The project on screen: the one opened, or the one just created.
   const [currentId, setCurrentId] = useState<string | undefined>(projectId);
+  // What the open project was last run with, to tell when it has been edited.
+  const [lastRun, setLastRun] = useState("");
   const [form, setForm] = useState<PlannerForm>(DEFAULT_FORM);
   const [points, setPoints] = useState<Record<PointName, LatLng | null>>({ A: null, B: null });
   const [picking, setPicking] = useState<PointName | null>(null);
@@ -112,6 +127,18 @@ export default function RoutePlanner({ projectId }: Props) {
           constraints: { ...DEFAULT_FORM.constraints, ...payload.hardConstraints },
         });
         setPoints({ A: payload.start || null, B: payload.end || null });
+        setLastRun(
+          settingsKey(
+            {
+              projectName: payload.projectName || "",
+              constructionType: payload.constructionType || "road",
+              widthMeters: Number(payload.widthMeters) || 20,
+              priorities: { ...DEFAULT_FORM.priorities, ...payload.softPreferences },
+              constraints: { ...DEFAULT_FORM.constraints, ...payload.hardConstraints },
+            },
+            { A: payload.start || null, B: payload.end || null }
+          )
+        );
 
         if (project.result) accept(project.result);
         else if (project.status === "failed") setError(project.error || "The analysis failed.");
@@ -193,6 +220,7 @@ export default function RoutePlanner({ projectId }: Props) {
       // Keep the address in step without reloading the page.
       window.history.replaceState(null, "", `#/plan/${started.projectId}`);
       setCurrentId(started.projectId);
+      setLastRun(settingsKey(form, points));
       follow(started.projectId);
     } catch (problem) {
       setError(errorMessage(problem, "Could not start the analysis."));
@@ -265,7 +293,9 @@ export default function RoutePlanner({ projectId }: Props) {
                 onPickPoint={setPicking}
                 running={running}
                 error={error}
-                existing={Boolean(currentId)}
+                reopened={Boolean(projectId)}
+                edited={settingsKey(form, points) !== lastRun}
+                hasResult={hasResult}
                 onRun={run}
               />
             </>

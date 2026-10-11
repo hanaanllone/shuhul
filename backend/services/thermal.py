@@ -44,6 +44,11 @@ IMPACT_ZONE_M = 300.0
 NOTICEABLE_CHANGE_C = 0.25
 COVERAGE_SUPERSAMPLE = 3
 
+# A model is used for an area only when its grid has data for at least
+# this share of it. The first model with nearly all of it is taken.
+MIN_MODEL_COVER = 0.5
+FULL_MODEL_COVER = 0.99
+
 # Surface features a change overwrites. Everything else about a cell
 # (terrain, distance to water) stays as it is.
 SURFACE_FEATURES = [
@@ -75,26 +80,57 @@ def _load(district):
     return folder, summary, model
 
 
+def _data_share(features_path, bounds):
+    """
+    Share of an area that a model's grid has data for. A district's grid
+    is a rectangle that runs past its own boundary into its neighbours,
+    where it is empty, so containing an area is not the same as covering it.
+    """
+    with rasterio.open(features_path) as src:
+        if not box(*src.bounds).contains(box(*bounds)):
+            return 0.0
+
+        window = from_bounds(*bounds, transform=src.transform)
+        window = window.round_offsets().round_lengths()
+        rows = max(1, min(64, int(window.height)))
+        cols = max(1, min(64, int(window.width)))
+
+        sample = src.read(1, window=window, out_shape=(rows, cols)).astype("float32")
+        valid = np.isfinite(sample)
+        if src.nodata is not None:
+            valid &= sample != src.nodata
+        return float(valid.mean())
+
+
 def _covering_district(bounds, district=None):
     """
-    Find a fitted model whose grid contains the bounds. The district that
-    was asked for is tried first, then any other, so a city nested inside
-    a larger district can use that district's model.
+    Find the fitted model that has the most data for the bounds. The
+    district that was asked for is tried first, then the others, so a city
+    nested inside a larger district uses that district's model.
     """
     candidates = []
     if district:
         candidates.append(Path(PROCESSED_ROOT) / district)
     candidates.extend(sorted(Path(PROCESSED_ROOT).glob("*")))
 
+    best, best_share, seen = None, 0.0, set()
+
     for folder in candidates:
         features = folder / "thermal" / "features.tif"
-        if not features.exists():
+        if folder.name in seen or not features.exists():
             continue
-        with rasterio.open(features) as src:
-            if box(*src.bounds).contains(box(*bounds)):
-                return folder.name
+        seen.add(folder.name)
 
-    raise ThermalUnavailable("No temperature data for this location.")
+        share = _data_share(features, bounds)
+        if share > best_share:
+            best, best_share = folder.name, share
+        if share >= FULL_MODEL_COVER:
+            break
+
+    if best is None or best_share < MIN_MODEL_COVER:
+        raise ThermalUnavailable("No temperature data for this location.")
+
+    return best
 
 
 def model_summary(district):
@@ -264,6 +300,13 @@ def _apply(features, summary, changes, transform):
 # SCENARIOS
 # ------------------------------------------------------------
 
+def _zone_mean(array, zone, scale, digits):
+    """Mean of a layer over a zone, or None where the zone has no data."""
+    values = array[zone]
+    values = values[np.isfinite(values)]
+    return round(scale * float(values.mean()), digits) if values.size else None
+
+
 def _zone_stats(zone, observed, baseline, scenario, features, cell_ha):
     delta = (scenario - baseline)[zone]
     delta = delta[np.isfinite(delta)]
@@ -285,9 +328,9 @@ def _zone_stats(zone, observed, baseline, scenario, features, cell_ha):
         "heat_removed_degree_ha": round(abs(float(delta[delta < 0].sum())) * cell_ha, 2),
         "area_noticeably_warmer_ha": round(float((delta >= NOTICEABLE_CHANGE_C).sum()) * cell_ha, 2),
         "area_noticeably_cooler_ha": round(float((delta <= -NOTICEABLE_CHANGE_C).sum()) * cell_ha, 2),
-        "canopy_pct": round(100 * float(np.nanmean(features["canopy_share"][zone])), 1),
-        "ndvi": round(float(np.nanmean(features["ndvi"][zone])), 3),
-        "built_up_pct": round(100 * float(np.nanmean(features["built_share"][zone])), 1),
+        "canopy_pct": _zone_mean(features["canopy_share"], zone, 100, 1),
+        "ndvi": _zone_mean(features["ndvi"], zone, 1, 3),
+        "built_up_pct": _zone_mean(features["built_share"], zone, 100, 1),
     }
 
 

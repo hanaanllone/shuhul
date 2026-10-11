@@ -27,6 +27,7 @@ interface Zone {
 }
 
 interface Sites extends GeoJSON.FeatureCollection {
+  district: string;
   zones_ranked: number;
   method: {
     weights: Record<string, number>;
@@ -69,6 +70,8 @@ export default function SiteFinder() {
   const [avoidFlood, setAvoidFlood] = useState(true);
 
   const [data, setData] = useState<Sites | null>(null);
+  // Counts the answers received, so the map redraws for each one.
+  const [answer, setAnswer] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState<Zone | null>(null);
@@ -81,7 +84,10 @@ export default function SiteFinder() {
     // Wait for the slider to settle before asking.
     const timer = window.setTimeout(() => {
       api<Sites>(`/api/sites/${district}?min_ha=${minHa}&road=${needRoad ? 1 : 0}&flood=${avoidFlood ? 1 : 0}`)
-        .then(setData)
+        .then((found) => {
+          setData(found);
+          setAnswer((previous) => previous + 1);
+        })
         .catch((problem) => {
           setData(null);
           setError(errorMessage(problem, "Could not look for sites."));
@@ -96,9 +102,10 @@ export default function SiteFinder() {
 
   const bounds = useMemo<LatLngBoundsExpression | null>(
     () => (data && data.features.length ? leafletGeoJSON(data).getBounds() : null),
-    // Only when the district changes, so the map does not jump on every filter.
+    // Only when the answer is for another district, so the map moves to
+    // it but does not jump on every change of the needs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data?.features.length, district]
+    [data?.district]
   );
 
   const counts = useMemo(() => {
@@ -132,7 +139,7 @@ export default function SiteFinder() {
             <FitBounds bounds={bounds} />
             {data && (
               <GeoJSON
-                key={`${district}-${minHa}-${needRoad}-${avoidFlood}-${picked?.zone_id}`}
+                key={`${answer}-${picked?.zone_id}`}
                 data={data}
                 style={(feature) => {
                   const zone = feature?.properties as Zone;

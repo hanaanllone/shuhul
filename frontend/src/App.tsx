@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ErrorBoundary from "./components/ErrorBoundary";
 import NavBar from "./components/NavBar";
 import { api, post } from "./lib/api";
 import type { User } from "./lib/types";
@@ -95,7 +96,7 @@ export default function App() {
   return (
     <>
       <NavBar current={current} user={user} onNavigate={navigate} onLogout={logout} />
-      {page}
+      <ErrorBoundary resetKey={current}>{page}</ErrorBoundary>
     </>
   );
 }
