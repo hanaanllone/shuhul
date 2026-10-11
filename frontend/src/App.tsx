@@ -13,6 +13,7 @@ import Profile from "./pages/Profile";
 import RoutePlanner from "./pages/RoutePlanner";
 import Settings from "./pages/Settings";
 import SiteFinder from "./pages/SiteFinder";
+import SmartCity from "./pages/SmartCity";
 import Watch from "./pages/Watch";
 
 // The address after "#/" decides the page: "plan", "plan/<id>",
@@ -83,6 +84,8 @@ export default function App() {
     page = <AirClimate />;
   } else if (current === "environment/sites") {
     page = <SiteFinder />;
+  } else if (section === "smart-city") {
+    page = <SmartCity />;
   } else if (section === "watch") {
     page = <Watch onNavigate={navigate} />;
   } else if (section === "profile") {

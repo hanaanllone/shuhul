@@ -22,6 +22,7 @@ const ITEMS: NavItem[] = [
       { label: "Air and temperature", path: "environment/air", hint: "Today and the past year" },
     ],
   },
+  { label: "Smart city Srinagar", path: "smart-city" },
 ];
 
 interface Props {
